@@ -3,27 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CS2 WebGL Movement - Dust II (Optimized)</title>
+    <title>CS2 WebGL Movement - Advanced Physics & Menus</title>
     <style>
         body {
             margin: 0;
             overflow: hidden;
             background-color: #000;
-            font-family: Arial, sans-serif;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
-        #blocker {
+        
+        /* UI Overlay */
+        #ui-layer {
             position: absolute;
             width: 100%;
             height: 100%;
-            background-color: rgba(0,0,0,0.6);
+            pointer-events: none; /* Let clicks pass through when playing */
+            z-index: 10;
             display: flex;
             align-items: center;
             justify-content: center;
-            color: white;
-            text-align: center;
-            cursor: pointer;
-            z-index: 10;
         }
+
         #crosshair {
             position: absolute;
             top: 50%;
@@ -32,18 +32,63 @@
             height: 4px;
             background-color: #00ff00;
             transform: translate(-50%, -50%);
-            z-index: 5;
-            pointer-events: none;
         }
+
         #loading {
             position: absolute;
             top: 10px;
             left: 10px;
             color: white;
             font-weight: bold;
-            z-index: 20;
             text-shadow: 1px 1px 2px black;
         }
+
+        /* Menus */
+        #menu-container {
+            pointer-events: auto; /* Re-enable clicks for the menu */
+            background-color: rgba(20, 20, 20, 0.85);
+            padding: 30px 50px;
+            border-radius: 8px;
+            color: white;
+            text-align: center;
+            border: 1px solid #444;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            min-width: 300px;
+        }
+
+        .menu-screen {
+            display: none;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .menu-screen.active {
+            display: flex;
+        }
+
+        h2 { margin-top: 0; margin-bottom: 20px; color: #ffaa00; }
+        
+        button {
+            background-color: #444;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+        button:hover { background-color: #666; }
+        
+        .setting-group {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            margin-bottom: 15px;
+        }
+        .setting-group label { margin-bottom: 5px; font-size: 14px; }
+        input[type="range"] { width: 100%; cursor: pointer; }
+
     </style>
     <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
     <script type="importmap">
@@ -56,14 +101,35 @@
     </script>
 </head>
 <body>
-    <div id="loading">Loading Map Geometry...</div>
-    <div id="blocker">
-        <div>
-            <h2>Click to Play</h2>
-            <p>W, A, S, D to move | SPACE to jump | Mouse to look</p>
+    <div id="ui-layer">
+        <div id="loading">Loading Map Geometry...</div>
+        <div id="crosshair"></div>
+        
+        <div id="menu-container">
+            <div id="main-menu" class="menu-screen active">
+                <h2>Game Paused</h2>
+                <button id="resume-btn">Resume Game</button>
+                <button id="settings-btn">Settings</button>
+                <p style="color: #aaa; font-size: 12px; margin-top: 20px;">
+                    WASD: Move | SPACE: Jump<br>
+                    SHIFT: Sprint | CTRL: Crouch
+                </p>
+            </div>
+
+            <div id="settings-menu" class="menu-screen">
+                <h2>Settings</h2>
+                <div class="setting-group">
+                    <label>Sensitivity: <span id="sens-val">1.0</span></label>
+                    <input type="range" id="sens-slider" min="0.1" max="5.0" step="0.1" value="1.0">
+                </div>
+                <div class="setting-group">
+                    <label>Base FOV: <span id="fov-val">75</span></label>
+                    <input type="range" id="fov-slider" min="60" max="110" step="1" value="75">
+                </div>
+                <button id="back-btn" style="margin-top: 10px;">Back</button>
+            </div>
         </div>
     </div>
-    <div id="crosshair"></div>
 
     <script type="module">
         import * as THREE from 'three';
@@ -72,25 +138,26 @@
         import { Octree } from 'three/addons/math/Octree.js';
         import { Capsule } from 'three/addons/math/Capsule.js';
 
-        // --- Setup Scene, Camera, Renderer ---
+        // --- Core Setup ---
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x87CEEB); 
         scene.fog = new THREE.Fog(0x87CEEB, 0, 300);
 
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        // Global Settings Variables
+        let baseFov = 75;
+
+        const camera = new THREE.PerspectiveCamera(baseFov, window.innerWidth / window.innerHeight, 0.1, 1000);
         camera.rotation.order = 'YXZ'; 
 
-        const renderer = new THREE.WebGLRenderer({ antialias: false }); // Antialias off for optimization
+        const renderer = new THREE.WebGLRenderer({ antialias: false }); 
         renderer.setSize(window.innerWidth, window.innerHeight);
-        // OPTIMIZATION: Cap pixel ratio. Prevents massive lag on 4K/Mac Retina displays
         renderer.setPixelRatio(1); 
         renderer.outputColorSpace = THREE.SRGBColorSpace; 
         document.body.appendChild(renderer.domElement);
 
-        // --- Lighting ---
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
         scene.add(ambientLight);
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1.0); // Slightly lowered intensity
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.0); 
         dirLight.position.set(50, 100, 50);
         scene.add(dirLight);
 
@@ -98,11 +165,15 @@
         const clock = new THREE.Clock();
         const worldOctree = new Octree();
 
-        // Player Capsule: 40% Shorter. Height changed from 1.1 to 0.38
+        // Capsule Setup (40% shorter)
+        const CAPSULE_RADIUS = 0.35;
+        const HEIGHT_STAND = 0.38;
+        const HEIGHT_CROUCH = 0.05; // Physically shrinks to go under things
+
         const playerCollider = new Capsule(
             new THREE.Vector3(0, 0, 0), 
-            new THREE.Vector3(0, 0.38, 0), 
-            0.35
+            new THREE.Vector3(0, HEIGHT_STAND, 0), 
+            CAPSULE_RADIUS
         );
 
         const playerVelocity = new THREE.Vector3();
@@ -110,21 +181,63 @@
         let playerOnFloor = false;
         let mapLoaded = false;
 
-        // Physics Tweaks for CS Walking
+        // Speed & Movement Tweaks
         const GRAVITY = 30.0;
         const JUMP_FORCE = 11.0;
-        const SPEED = 75.0; // Increased to compensate for high friction
+        const BASE_SPEED = 35.0;   // Way slower base walk
+        const SPRINT_SPEED = 65.0; // Faster sprint
+        const CROUCH_SPEED = 15.0; // Very slow crouch
         const AIR_CONTROL = 15.0;
 
-        // --- Controls & Input ---
+        // --- Controls & Menu Logic ---
         const controls = new PointerLockControls(camera, document.body);
-        const blocker = document.getElementById('blocker');
+        
+        const menuContainer = document.getElementById('menu-container');
+        const mainMenu = document.getElementById('main-menu');
+        const settingsMenu = document.getElementById('settings-menu');
+        const resumeBtn = document.getElementById('resume-btn');
+        const settingsBtn = document.getElementById('settings-btn');
+        const backBtn = document.getElementById('back-btn');
 
-        blocker.addEventListener('click', () => controls.lock());
-        controls.addEventListener('lock', () => blocker.style.display = 'none');
-        controls.addEventListener('unlock', () => blocker.style.display = 'flex');
+        // Menu Event Listeners
+        resumeBtn.addEventListener('click', () => controls.lock());
+        
+        settingsBtn.addEventListener('click', () => {
+            mainMenu.classList.remove('active');
+            settingsMenu.classList.add('active');
+        });
+        
+        backBtn.addEventListener('click', () => {
+            settingsMenu.classList.remove('active');
+            mainMenu.classList.add('active');
+        });
 
-        const keyStates = { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false };
+        // PointerLock Event Listeners
+        controls.addEventListener('lock', () => menuContainer.style.display = 'none');
+        controls.addEventListener('unlock', () => {
+            menuContainer.style.display = 'block';
+            mainMenu.classList.add('active');
+            settingsMenu.classList.remove('active');
+        });
+
+        // Settings Sliders
+        document.getElementById('sens-slider').addEventListener('input', (e) => {
+            controls.pointerSpeed = parseFloat(e.target.value);
+            document.getElementById('sens-val').innerText = e.target.value;
+        });
+
+        document.getElementById('fov-slider').addEventListener('input', (e) => {
+            baseFov = parseInt(e.target.value);
+            document.getElementById('fov-val').innerText = baseFov;
+            camera.fov = baseFov;
+            camera.updateProjectionMatrix();
+        });
+
+        // Input Tracking
+        const keyStates = { 
+            KeyW: false, KeyA: false, KeyS: false, KeyD: false, 
+            Space: false, ShiftLeft: false, ControlLeft: false 
+        };
 
         document.addEventListener('keydown', (event) => {
             if (keyStates[event.code] !== undefined) keyStates[event.code] = true;
@@ -133,7 +246,7 @@
             if (keyStates[event.code] !== undefined) keyStates[event.code] = false;
         });
 
-        // --- Map Loading, Optimizing, & Auto-Teleport ---
+        // --- Map Loading ---
         const MAP_URL = './dust2/scene.gltf'; 
         const loader = new GLTFLoader();
         const loadingText = document.getElementById('loading');
@@ -144,12 +257,11 @@
                 const map = gltf.scene;
                 map.scale.set(1.0, 1.0, 1.0); 
 
-                // OPTIMIZATION: Simplify materials to heavily reduce lag
                 map.traverse((child) => {
                     if (child.isMesh) {
-                        child.frustumCulled = true; // Don't render if behind camera
+                        child.frustumCulled = true; 
                         if (child.material) {
-                            child.material.metalness = 0.0; // Disable heavy reflections
+                            child.material.metalness = 0.0; 
                             child.material.roughness = 1.0; 
                         }
                     }
@@ -157,22 +269,17 @@
 
                 scene.add(map);
 
-                // Find Map Center and Teleport Lower
                 const box = new THREE.Box3().setFromObject(map);
                 const center = box.getCenter(new THREE.Vector3());
-                
-                // Spawn closer to the center Y instead of the very top of the skybox
                 const dropHeight = center.y + 10; 
                 
                 playerCollider.start.set(center.x, dropHeight, center.z);
-                playerCollider.end.set(center.x, dropHeight + 0.38, center.z); // Math matches shorter capsule
-                playerVelocity.set(0, 0, 0);
+                playerCollider.end.set(center.x, dropHeight + HEIGHT_STAND, center.z); 
 
-                // Build Collision
                 worldOctree.fromGraphNode(map);
                 mapLoaded = true;
 
-                loadingText.innerText = "Map & Collisions Loaded! Click to play.";
+                loadingText.innerText = "Map Loaded!";
                 loadingText.style.color = "#00ff00";
                 setTimeout(() => loadingText.style.display = 'none', 3000);
             },
@@ -204,7 +311,15 @@
         }
 
         function handleInput(deltaTime) {
-            const speedDelta = deltaTime * (playerOnFloor ? SPEED : AIR_CONTROL);
+            const isCrouching = keyStates['ControlLeft'];
+            const isSprinting = keyStates['ShiftLeft'] && !isCrouching && playerOnFloor;
+
+            // Determine Movement Speed
+            let currentSpeed = BASE_SPEED;
+            if (isCrouching) currentSpeed = CROUCH_SPEED;
+            else if (isSprinting) currentSpeed = SPRINT_SPEED;
+
+            const speedDelta = deltaTime * (playerOnFloor ? currentSpeed : AIR_CONTROL);
 
             if (keyStates['KeyW']) playerVelocity.add(getForwardVector().multiplyScalar(speedDelta));
             if (keyStates['KeyS']) playerVelocity.add(getForwardVector().multiplyScalar(-speedDelta));
@@ -215,6 +330,17 @@
                 playerVelocity.y = JUMP_FORCE;
                 keyStates['Space'] = false; 
             }
+
+            // Smoothly interpolate Camera FOV for sprinting
+            const targetFov = baseFov + (isSprinting ? 15 : 0);
+            camera.fov += (targetFov - camera.fov) * 10.0 * deltaTime;
+            camera.updateProjectionMatrix();
+
+            // Smoothly interpolate Capsule Height for crouching
+            const targetHeight = isCrouching ? HEIGHT_CROUCH : HEIGHT_STAND;
+            let currentHeight = playerCollider.end.y - playerCollider.start.y;
+            currentHeight += (targetHeight - currentHeight) * 15.0 * deltaTime;
+            playerCollider.end.y = playerCollider.start.y + currentHeight;
         }
 
         function playerCollisions() {
@@ -234,12 +360,10 @@
         }
 
         function updatePlayer(deltaTime) {
-            // FIXED MOVEMENT: Increased damping significantly (-15 instead of -4) to stop sliding
             let damping = Math.exp(-15 * deltaTime) - 1; 
 
             if (!playerOnFloor) {
                 playerVelocity.y -= GRAVITY * deltaTime; 
-                // Keep some air momentum, but much less than ground friction
                 damping *= 0.05; 
             }
 
@@ -250,7 +374,6 @@
             playerCollisions();
             camera.position.copy(playerCollider.end);
 
-            // Fail-safe
             if (camera.position.y < -500) {
                 playerVelocity.set(0, 0, 0);
                 playerCollider.start.y += 200; 
