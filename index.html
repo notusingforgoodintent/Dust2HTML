@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CS2 WebGL Movement - Dust II</title>
+    <title>CS2 WebGL Movement - Octree Collision</title>
     <style>
         body {
             margin: 0;
@@ -56,7 +56,7 @@
     </script>
 </head>
 <body>
-    <div id="loading">Loading Map...</div>
+    <div id="loading">Loading Map Geometry into Octree...</div>
     <div id="blocker">
         <div>
             <h2>Click to Play</h2>
@@ -69,18 +69,22 @@
         import * as THREE from 'three';
         import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        
+        // Import Octree and Capsule for full 3D collision
+        import { Octree } from 'three/addons/math/Octree.js';
+        import { Capsule } from 'three/addons/math/Capsule.js';
 
         // --- Setup Scene, Camera, Renderer ---
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x87CEEB); 
-        scene.fog = new THREE.Fog(0x87CEEB, 0, 300); // Extended fog for larger map
+        scene.fog = new THREE.Fog(0x87CEEB, 0, 300);
 
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const PLAYER_HEIGHT = 1.6;
+        // Camera starts unattached; we will glue it to the Capsule later
+        camera.rotation.order = 'YXZ'; 
 
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        // Sketchfab textures usually look best with sRGB encoding
         renderer.outputColorSpace = THREE.SRGBColorSpace; 
         document.body.appendChild(renderer.domElement);
 
@@ -91,160 +95,181 @@
         dirLight.position.set(50, 100, 50);
         scene.add(dirLight);
 
-        // --- Map Loading & Collision Setup ---
-        const objects = []; // Array to hold map parts for collision
+        // --- Physics & Collision Variables ---
+        const clock = new THREE.Clock();
+        const worldOctree = new Octree();
+
+        // Player Capsule: Starting at y=50 to fall onto the map. 
+        // Radius is 0.35. Height is from 50.35 to 51.45 (total height ~1.8 units)
+        const playerCollider = new Capsule(
+            new THREE.Vector3(0, 50.35, 0), 
+            new THREE.Vector3(0, 51.45, 0), 
+            0.35
+        );
+
+        const playerVelocity = new THREE.Vector3();
+        const playerDirection = new THREE.Vector3();
+        let playerOnFloor = false;
+
+        // Tweaked physics
+        const GRAVITY = 30.0;
+        const JUMP_FORCE = 12.0;
+        const SPEED = 25.0; // Adjusted for Capsule physics math
+        const AIR_CONTROL = 5.0;
+
+        // --- Map Loading ---
         const MAP_URL = './dust2/scene.gltf'; 
         const loader = new GLTFLoader();
         const loadingText = document.getElementById('loading');
+        let mapLoaded = false;
 
         loader.load(
             MAP_URL,
             (gltf) => {
                 const map = gltf.scene;
-                
-                // Adjust this if you load in and feel like a giant or an ant
                 map.scale.set(1.0, 1.0, 1.0); 
 
-                // Traverse the model to add collision to all its meshes
-                map.traverse((child) => {
-                    if (child.isMesh) {
-                        objects.push(child);
-                    }
-                });
-
                 scene.add(map);
-                loadingText.innerText = "Map Loaded! Click to play.";
+
+                // IMPORTANT: Generate the Octree from the loaded 3D model
+                // This builds the collision mesh data structure
+                worldOctree.fromGraphNode(map);
+                mapLoaded = true;
+
+                loadingText.innerText = "Map & Collisions Loaded! Click to play.";
                 loadingText.style.color = "#00ff00";
-                
-                // Optional: Hide the loading text after a few seconds
                 setTimeout(() => loadingText.style.display = 'none', 3000);
             },
             (xhr) => {
                 const percent = Math.round(xhr.loaded / xhr.total * 100);
-                loadingText.innerText = `Loading Map: ${percent}%`;
+                loadingText.innerText = `Loading Map & Building Octree: ${percent}%`;
             },
             (error) => {
                 console.error('Error loading map:', error);
-                loadingText.innerText = "Error loading map! Check console (F12).";
+                loadingText.innerText = "Error loading map!";
                 loadingText.style.color = "red";
             }
         );
 
-        // --- Controls & Pointer Lock ---
+        // --- Controls & Input ---
         const controls = new PointerLockControls(camera, document.body);
         const blocker = document.getElementById('blocker');
 
         blocker.addEventListener('click', () => controls.lock());
         controls.addEventListener('lock', () => blocker.style.display = 'none');
         controls.addEventListener('unlock', () => blocker.style.display = 'flex');
-        
-        // Initial spawn position - Spawned high up so you fall onto the map geometry safely
-        controls.getObject().position.set(0, 50, 0); 
-        scene.add(controls.getObject());
 
-        // --- Movement & Physics Variables ---
-        let moveForward = false;
-        let moveBackward = false;
-        let moveLeft = false;
-        let moveRight = false;
-        let canJump = false;
+        const keyStates = { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false };
 
-        let prevTime = performance.now();
-        const velocity = new THREE.Vector3();
-        const direction = new THREE.Vector3();
+        document.addEventListener('keydown', (event) => {
+            if (keyStates[event.code] !== undefined) keyStates[event.code] = true;
+        });
 
-        // Tweaked Physics
-        const GRAVITY = 28.0;      
-        const JUMP_FORCE = 10.5;   
-        const SPEED = 60.0;        
-        const FRICTION = 10.0;     
+        document.addEventListener('keyup', (event) => {
+            if (keyStates[event.code] !== undefined) keyStates[event.code] = false;
+        });
 
-        // Raycaster for checking the ground beneath the player
-        const raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0), 0, 10);
+        // --- Physics Engine Functions ---
 
-        // --- Input Listeners ---
-        const onKeyDown = (event) => {
-            switch (event.code) {
-                case 'ArrowUp':
-                case 'KeyW': moveForward = true; break;
-                case 'ArrowLeft':
-                case 'KeyA': moveLeft = true; break;
-                case 'ArrowDown':
-                case 'KeyS': moveBackward = true; break;
-                case 'ArrowRight':
-                case 'KeyD': moveRight = true; break;
-                case 'Space':
-                    if (canJump === true) velocity.y = JUMP_FORCE; 
-                    canJump = false;
-                    break;
+        function getForwardVector() {
+            camera.getWorldDirection(playerDirection);
+            playerDirection.y = 0; // Don't fly up when looking up
+            playerDirection.normalize();
+            return playerDirection;
+        }
+
+        function getSideVector() {
+            camera.getWorldDirection(playerDirection);
+            playerDirection.y = 0;
+            playerDirection.normalize();
+            playerDirection.cross(camera.up);
+            return playerDirection;
+        }
+
+        function handleInput(deltaTime) {
+            // Give different speed depending on if we are in the air or on the ground
+            const speedDelta = deltaTime * (playerOnFloor ? SPEED : AIR_CONTROL);
+
+            if (keyStates['KeyW']) playerVelocity.add(getForwardVector().multiplyScalar(speedDelta));
+            if (keyStates['KeyS']) playerVelocity.add(getForwardVector().multiplyScalar(-speedDelta));
+            if (keyStates['KeyA']) playerVelocity.add(getSideVector().multiplyScalar(-speedDelta));
+            if (keyStates['KeyD']) playerVelocity.add(getSideVector().multiplyScalar(speedDelta));
+
+            if (playerOnFloor && keyStates['Space']) {
+                playerVelocity.y = JUMP_FORCE;
+                keyStates['Space'] = false; // Prevent holding space to bounce
             }
-        };
+        }
 
-        const onKeyUp = (event) => {
-            switch (event.code) {
-                case 'ArrowUp':
-                case 'KeyW': moveForward = false; break;
-                case 'ArrowLeft':
-                case 'KeyA': moveLeft = false; break;
-                case 'ArrowDown':
-                case 'KeyS': moveBackward = false; break;
-                case 'ArrowRight':
-                case 'KeyD': moveRight = false; break;
+        function playerCollisions() {
+            // Check the Octree for intersection with our Capsule
+            const result = worldOctree.capsuleIntersect(playerCollider);
+            playerOnFloor = false;
+
+            if (result) {
+                // Determine if the surface we hit is flat enough to be a floor
+                playerOnFloor = result.normal.y > 0.5; // Walkable slope tolerance
+
+                if (!playerOnFloor) {
+                    // Wall collision: Slide along the wall instead of sticking to it
+                    playerVelocity.addScaledVector(result.normal, -result.normal.dot(playerVelocity));
+                } else {
+                    // Stop downward velocity when hitting the floor
+                    playerVelocity.y = Math.max(0, playerVelocity.y);
+                }
+
+                // Push the capsule out of the geometry so we don't clip
+                playerCollider.translate(result.normal.multiplyScalar(result.depth));
             }
-        };
+        }
 
-        document.addEventListener('keydown', onKeyDown);
-        document.addEventListener('keyup', onKeyUp);
+        function updatePlayer(deltaTime) {
+            let damping = Math.exp(-4 * deltaTime) - 1; // Ground friction
+
+            if (!playerOnFloor) {
+                playerVelocity.y -= GRAVITY * deltaTime; // Apply gravity
+                damping *= 0.1; // Less friction in the air
+            }
+
+            // Apply friction/damping to current velocity
+            playerVelocity.addScaledVector(playerVelocity, damping);
+
+            // Move the capsule by the current velocity
+            const deltaPosition = playerVelocity.clone().multiplyScalar(deltaTime);
+            playerCollider.translate(deltaPosition);
+
+            // Check for walls/floors and push the capsule out if needed
+            playerCollisions();
+
+            // Glue the camera to the top of the capsule (the player's eyes)
+            camera.position.copy(playerCollider.end);
+
+            // Fail-safe: if you fall off the map into the void, respawn
+            if (camera.position.y < -100) {
+                playerVelocity.set(0, 0, 0);
+                playerCollider.start.set(0, 50.35, 0);
+                playerCollider.end.set(0, 51.45, 0);
+            }
+        }
 
         // --- Game Loop ---
         function animate() {
             requestAnimationFrame(animate);
 
-            const time = performance.now();
-
-            if (controls.isLocked === true) {
-                const delta = (time - prevTime) / 1000;
-
-                // Ground Collision check
-                raycaster.ray.origin.copy(controls.getObject().position);
-                raycaster.ray.origin.y -= PLAYER_HEIGHT; 
+            // Only run physics if the map is loaded and we are actively playing
+            if (mapLoaded && controls.isLocked === true) {
+                // Use a smaller delta time to prevent physics clipping at low framerates
+                // Using 5 substeps per frame drastically improves wall collision reliability
+                const deltaTime = Math.min(0.05, clock.getDelta()) / 5;
                 
-                // Only check collision if the map has actually loaded into the objects array
-                const intersections = raycaster.intersectObjects(objects, false);
-                const onObject = intersections.length > 0 && intersections[0].distance < 0.2;
-
-                // Apply Friction
-                velocity.x -= velocity.x * FRICTION * delta;
-                velocity.z -= velocity.z * FRICTION * delta;
-                
-                // Apply Gravity
-                velocity.y -= GRAVITY * delta;
-
-                direction.z = Number(moveForward) - Number(moveBackward);
-                direction.x = Number(moveRight) - Number(moveLeft);
-                direction.normalize(); 
-
-                // Apply Acceleration
-                if (moveForward || moveBackward) velocity.z -= direction.z * SPEED * delta;
-                if (moveLeft || moveRight) velocity.x -= direction.x * SPEED * delta;
-
-                // Floor Collision Resolution
-                if (onObject === true) {
-                    velocity.y = Math.max(0, velocity.y);
-                    canJump = true;
+                for (let i = 0; i < 5; i++) {
+                    handleInput(deltaTime);
+                    updatePlayer(deltaTime);
                 }
-
-                controls.moveRight(-velocity.x * delta);
-                controls.moveForward(-velocity.z * delta);
-                controls.getObject().position.y += (velocity.y * delta);
-
-                // Absolute Floor Fail-safe (Prevents falling into the void forever)
-                if (controls.getObject().position.y < -100) {
-                    velocity.y = 0;
-                    controls.getObject().position.set(0, 50, 0); // Respawn high up
-                }
+            } else {
+                clock.getDelta(); // Keep clock running to avoid massive jumps when unpausing
             }
-            prevTime = time;
+
             renderer.render(scene, camera);
         }
 
