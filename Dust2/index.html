@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CS2 WebGL Movement - Dust II</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: Arial, sans-serif;
+        }
+        #blocker {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            text-align: center;
+            cursor: pointer;
+            z-index: 10;
+        }
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 4px;
+            height: 4px;
+            background-color: #00ff00;
+            transform: translate(-50%, -50%);
+            z-index: 5;
+            pointer-events: none;
+        }
+        #loading {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-weight: bold;
+            z-index: 20;
+            text-shadow: 1px 1px 2px black;
+        }
+    </style>
+    <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="loading">Loading Map...</div>
+    <div id="blocker">
+        <div>
+            <h2>Click to Play</h2>
+            <p>W, A, S, D to move | SPACE to jump | Mouse to look</p>
+        </div>
+    </div>
+    <div id="crosshair"></div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        // --- Setup Scene, Camera, Renderer ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB); 
+        scene.fog = new THREE.Fog(0x87CEEB, 0, 300); // Extended fog for larger map
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const PLAYER_HEIGHT = 1.6;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        // Sketchfab textures usually look best with sRGB encoding
+        renderer.outputColorSpace = THREE.SRGBColorSpace; 
+        document.body.appendChild(renderer.domElement);
+
+        // --- Lighting ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        dirLight.position.set(50, 100, 50);
+        scene.add(dirLight);
+
+        // --- Map Loading & Collision Setup ---
+        const objects = []; // Array to hold map parts for collision
+        const MAP_URL = './dust2/scene.gltf'; 
+        const loader = new GLTFLoader();
+        const loadingText = document.getElementById('loading');
+
+        loader.load(
+            MAP_URL,
+            (gltf) => {
+                const map = gltf.scene;
+                
+                // Adjust this if you load in and feel like a giant or an ant
+                map.scale.set(1.0, 1.0, 1.0); 
+
+                // Traverse the model to add collision to all its meshes
+                map.traverse((child) => {
+                    if (child.isMesh) {
+                        objects.push(child);
+                    }
+                });
+
+                scene.add(map);
+                loadingText.innerText = "Map Loaded! Click to play.";
+                loadingText.style.color = "#00ff00";
+                
+                // Optional: Hide the loading text after a few seconds
+                setTimeout(() => loadingText.style.display = 'none', 3000);
+            },
+            (xhr) => {
+                const percent = Math.round(xhr.loaded / xhr.total * 100);
+                loadingText.innerText = `Loading Map: ${percent}%`;
+            },
+            (error) => {
+                console.error('Error loading map:', error);
+                loadingText.innerText = "Error loading map! Check console (F12).";
+                loadingText.style.color = "red";
+            }
+        );
+
+        // --- Controls & Pointer Lock ---
+        const controls = new PointerLockControls(camera, document.body);
+        const blocker = document.getElementById('blocker');
+
+        blocker.addEventListener('click', () => controls.lock());
+        controls.addEventListener('lock', () => blocker.style.display = 'none');
+        controls.addEventListener('unlock', () => blocker.style.display = 'flex');
+        
+        // Initial spawn position - Spawned high up so you fall onto the map geometry safely
+        controls.getObject().position.set(0, 50, 0); 
+        scene.add(controls.getObject());
+
+        // --- Movement & Physics Variables ---
+        let moveForward = false;
+        let moveBackward = false;
+        let moveLeft = false;
+        let moveRight = false;
+        let canJump = false;
+
+        let prevTime = performance.now();
+        const velocity = new THREE.Vector3();
+        const direction = new THREE.Vector3();
+
+        // Tweaked Physics
+        const GRAVITY = 28.0;      
+        const JUMP_FORCE = 10.5;   
+        const SPEED = 60.0;        
+        const FRICTION = 10.0;     
+
+        // Raycaster for checking the ground beneath the player
+        const raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0), 0, 10);
+
+        // --- Input Listeners ---
+        const onKeyDown = (event) => {
+            switch (event.code) {
+                case 'ArrowUp':
+                case 'KeyW': moveForward = true; break;
+                case 'ArrowLeft':
+                case 'KeyA': moveLeft = true; break;
+                case 'ArrowDown':
+                case 'KeyS': moveBackward = true; break;
+                case 'ArrowRight':
+                case 'KeyD': moveRight = true; break;
+                case 'Space':
+                    if (canJump === true) velocity.y = JUMP_FORCE; 
+                    canJump = false;
+                    break;
+            }
+        };
+
+        const onKeyUp = (event) => {
+            switch (event.code) {
+                case 'ArrowUp':
+                case 'KeyW': moveForward = false; break;
+                case 'ArrowLeft':
+                case 'KeyA': moveLeft = false; break;
+                case 'ArrowDown':
+                case 'KeyS': moveBackward = false; break;
+                case 'ArrowRight':
+                case 'KeyD': moveRight = false; break;
+            }
+        };
+
+        document.addEventListener('keydown', onKeyDown);
+        document.addEventListener('keyup', onKeyUp);
+
+        // --- Game Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const time = performance.now();
+
+            if (controls.isLocked === true) {
+                const delta = (time - prevTime) / 1000;
+
+                // Ground Collision check
+                raycaster.ray.origin.copy(controls.getObject().position);
+                raycaster.ray.origin.y -= PLAYER_HEIGHT; 
+                
+                // Only check collision if the map has actually loaded into the objects array
+                const intersections = raycaster.intersectObjects(objects, false);
+                const onObject = intersections.length > 0 && intersections[0].distance < 0.2;
+
+                // Apply Friction
+                velocity.x -= velocity.x * FRICTION * delta;
+                velocity.z -= velocity.z * FRICTION * delta;
+                
+                // Apply Gravity
+                velocity.y -= GRAVITY * delta;
+
+                direction.z = Number(moveForward) - Number(moveBackward);
+                direction.x = Number(moveRight) - Number(moveLeft);
+                direction.normalize(); 
+
+                // Apply Acceleration
+                if (moveForward || moveBackward) velocity.z -= direction.z * SPEED * delta;
+                if (moveLeft || moveRight) velocity.x -= direction.x * SPEED * delta;
+
+                // Floor Collision Resolution
+                if (onObject === true) {
+                    velocity.y = Math.max(0, velocity.y);
+                    canJump = true;
+                }
+
+                controls.moveRight(-velocity.x * delta);
+                controls.moveForward(-velocity.z * delta);
+                controls.getObject().position.y += (velocity.y * delta);
+
+                // Absolute Floor Fail-safe (Prevents falling into the void forever)
+                if (controls.getObject().position.y < -100) {
+                    velocity.y = 0;
+                    controls.getObject().position.set(0, 50, 0); // Respawn high up
+                }
+            }
+            prevTime = time;
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resizing
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
