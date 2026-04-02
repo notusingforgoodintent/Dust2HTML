@@ -3,60 +3,112 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CS2 WebGL - Radar & Inventory Update</title>
+    <title>CS2 WebGL - UI Overhaul & Smart AI</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #111; font-family: 'Segoe UI', Tahoma, sans-serif; color: #ddd; user-select: none; }
+        @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Roboto:wght@400;700&display=swap');
+
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Roboto', sans-serif; color: #eee; user-select: none; }
         
         /* UI Layers */
         #ui-layer { position: absolute; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
-        #menu-layer { position: absolute; width: 100%; height: 100%; background: rgba(15,15,15,0.95); z-index: 20; display: flex; align-items: flex-start; justify-content: center; padding-top: 50px; gap: 20px;}
         
+        /* CS2 Menu Style */
+        #menu-layer { 
+            position: absolute; width: 100%; height: 100%; 
+            background: radial-gradient(circle at center, rgba(30,35,45,0.4) 0%, rgba(10,12,15,0.95) 100%);
+            backdrop-filter: blur(8px);
+            z-index: 20; display: flex; 
+        }
+
+        .cs2-sidebar {
+            width: 300px; height: 100%; background: rgba(0,0,0,0.6);
+            border-right: 1px solid rgba(255,255,255,0.05);
+            display: flex; flex-direction: column; padding: 20px; box-sizing: border-box;
+            pointer-events: auto; z-index: 25;
+        }
+
+        .cs2-content {
+            flex: 1; padding: 40px; pointer-events: auto; display: flex; flex-direction: column; z-index: 25;
+        }
+
+        .cs2-header { font-family: 'Rajdhani', sans-serif; font-size: 32px; font-weight: 700; color: #fff; text-transform: uppercase; margin-bottom: 20px; letter-spacing: 2px; }
+        .cs2-accent { color: #e5c158; } /* CS2 Yellow */
+
+        .cs2-btn {
+            background: rgba(255,255,255,0.05); color: #ccc; border: 1px solid rgba(255,255,255,0.1);
+            padding: 12px 20px; font-family: 'Rajdhani', sans-serif; font-size: 18px; font-weight: 600;
+            text-transform: uppercase; cursor: pointer; transition: 0.2s; text-align: left;
+            margin-bottom: 10px; position: relative; overflow: hidden;
+        }
+        .cs2-btn:hover { background: rgba(255,255,255,0.15); color: #fff; border-color: rgba(255,255,255,0.3); padding-left: 25px; }
+        .cs2-btn.play { background: rgba(76, 175, 80, 0.2); border-color: #4caf50; color: #fff; }
+        .cs2-btn.play:hover { background: rgba(76, 175, 80, 0.4); }
+        .cs2-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .cs2-panel {
+            background: rgba(15, 15, 20, 0.8); border: 1px solid rgba(255,255,255,0.05);
+            padding: 20px; border-radius: 4px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            margin-bottom: 20px;
+        }
+
+        /* 3D Preview Overlay */
+        #preview-container {
+            position: absolute; right: 10%; top: 50%; transform: translateY(-50%);
+            width: 400px; height: 400px; pointer-events: none; z-index: 22;
+        }
+
+        /* Crosshair */
         #crosshair { position: absolute; top: 50%; left: 50%; width: 4px; height: 4px; background-color: #0f0; transform: translate(-50%, -50%); display: none; }
 
-        /* Minimap / Radar */
-        #minimap { position: absolute; top: 20px; left: 20px; width: 150px; height: 150px; background: rgba(0, 0, 0, 0.6); border: 2px solid #555; border-radius: 50%; display: none; }
+        /* Minimap */
+        #minimap { position: absolute; top: 20px; left: 20px; width: 160px; height: 160px; background: rgba(15, 15, 20, 0.8); border: 2px solid rgba(255,255,255,0.1); border-radius: 50%; display: none; box-shadow: 0 5px 15px rgba(0,0,0,0.5); }
 
-        /* HUD & Inventory */
-        #hud { position: absolute; bottom: 20px; left: 20px; display: none; flex-direction: column; gap: 5px; }
-        .hud-box { background: rgba(0, 0, 0, 0.6); padding: 10px 20px; border-left: 4px solid #fff; font-size: 20px; font-weight: bold; }
-        #hud-health { border-color: #ff3333; }
-        #hud-money { border-color: #33ff33; color: #33ff33; }
-        #hud-team { font-size: 14px; border-color: #aaa; }
+        /* HUD */
+        #hud { position: absolute; bottom: 30px; left: 30px; display: none; flex-direction: column; gap: 8px; }
+        .hud-box { background: rgba(15, 15, 20, 0.85); padding: 12px 25px; border-left: 4px solid #fff; font-family: 'Rajdhani', sans-serif; font-size: 24px; font-weight: 700; }
+        #hud-health { border-color: #ff4444; }
+        #hud-money { border-color: #44ff44; color: #44ff44; }
+        #hud-team { font-size: 16px; border-color: #aaa; }
 
-        #inventory-hud { position: absolute; bottom: 20px; right: 20px; display: none; flex-direction: column; gap: 5px; text-align: right;}
-        .inv-slot { background: rgba(0, 0, 0, 0.6); padding: 10px 20px; border-right: 4px solid #555; font-size: 16px; font-weight: bold; color: #aaa; transition: 0.1s;}
-        .inv-slot.active { border-color: #ffcc00; color: #fff; transform: scale(1.05); transform-origin: right;}
+        /* Inventory Overlay */
+        #inventory-hud { position: absolute; bottom: 30px; right: 30px; display: none; flex-direction: column; gap: 8px; text-align: right;}
+        .inv-slot { background: rgba(15, 15, 20, 0.85); padding: 10px 25px; border-right: 4px solid rgba(255,255,255,0.1); font-family: 'Rajdhani', sans-serif; font-size: 18px; font-weight: 600; color: #888; transition: 0.15s;}
+        .inv-slot.active { border-color: #e5c158; color: #fff; transform: scale(1.05); transform-origin: right; background: rgba(30, 30, 40, 0.95); }
 
         /* Chat */
-        #chat-container { position: absolute; bottom: 160px; left: 20px; width: 300px; display: none; flex-direction: column; gap: 5px; }
-        #chat-log { max-height: 150px; overflow-y: hidden; display: flex; flex-direction: column; gap: 2px; font-size: 14px; text-shadow: 1px 1px 1px #000; }
-        #chat-input { display: none; width: 100%; padding: 8px; background: rgba(0,0,0,0.6); border: 1px solid #555; color: white; pointer-events: auto; outline: none; }
+        #chat-container { position: absolute; bottom: 180px; left: 30px; width: 350px; display: none; flex-direction: column; gap: 5px; }
+        #chat-log { max-height: 200px; overflow-y: hidden; display: flex; flex-direction: column; gap: 4px; font-size: 14px; text-shadow: 1px 1px 2px #000; font-family: 'Roboto', sans-serif; }
+        #chat-input { display: none; width: 100%; padding: 10px; background: rgba(0,0,0,0.8); border: 1px solid rgba(255,255,255,0.2); color: white; pointer-events: auto; outline: none; font-family: 'Roboto', sans-serif; }
 
         /* Death Screen */
-        #death-screen { position: absolute; width: 100%; height: 100%; background: rgba(200, 0, 0, 0.4); display: none; align-items: center; justify-content: center; flex-direction: column; z-index: 15; }
-        #death-screen h1 { font-size: 48px; color: white; margin: 0; text-shadow: 2px 2px 5px black; }
+        #death-screen { position: absolute; width: 100%; height: 100%; background: radial-gradient(circle, rgba(200,0,0,0.2) 0%, rgba(50,0,0,0.8) 100%); display: none; align-items: center; justify-content: center; flex-direction: column; z-index: 15; backdrop-filter: blur(2px); }
+        #death-screen h1 { font-family: 'Rajdhani', sans-serif; font-size: 72px; color: #ff4444; margin: 0; text-shadow: 0 5px 15px rgba(0,0,0,0.8); text-transform: uppercase; }
 
-        /* Windows & Menus */
-        .window { background: rgba(20, 20, 20, 0.95); padding: 30px; border: 1px solid #444; pointer-events: auto; display: none; flex-direction: column; gap: 15px; min-width: 300px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-        .window.active { display: flex; }
-        h2 { margin: 0 0 10px 0; font-weight: normal; border-bottom: 1px solid #444; padding-bottom: 10px; color: #fff; text-align: center;}
-        
-        button { background-color: #333; color: white; border: 1px solid #555; padding: 10px; cursor: pointer; transition: 0.1s; font-size: 14px; font-weight: bold;}
-        button:hover { background-color: #666; }
-        button:disabled { background-color: #222; color: #555; cursor: not-allowed; }
-        input[type="text"] { padding: 10px; background: #222; border: 1px solid #444; color: white; }
+        /* Center Windows (Pause, Buy) */
+        .center-window { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(15, 15, 20, 0.95); border: 1px solid rgba(255,255,255,0.1); padding: 30px; display: none; flex-direction: column; gap: 15px; min-width: 350px; box-shadow: 0 20px 50px rgba(0,0,0,0.8); pointer-events: auto; backdrop-filter: blur(10px); }
+        .center-window.active { display: flex; }
+        .center-window h2 { font-family: 'Rajdhani', sans-serif; text-transform: uppercase; margin: 0 0 15px 0; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px; color: #fff; }
 
-        .setting-group { display: flex; flex-direction: column; margin-bottom: 5px; font-size: 13px; color: #ccc; }
-        .setting-group label { margin-bottom: 5px; }
-        .setting-group input[type="range"] { width: 100%; cursor: pointer; }
+        /* Settings */
+        .setting-group { display: flex; flex-direction: column; margin-bottom: 10px; font-size: 14px; color: #aaa; }
+        .setting-group label { margin-bottom: 8px; font-weight: bold; color: #eee; }
+        .setting-group input[type="range"] { width: 100%; cursor: pointer; accent-color: #e5c158; }
 
         /* Cases & Skins UI */
-        #unboxed-item { margin: 10px 0; font-size: 20px; font-weight: bold; padding: 15px; background: #222; border: 2px dashed #555; text-align: center; min-height: 25px; transition: 0.1s;}
-        .skin-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; max-height: 250px; overflow-y: auto; padding-right: 5px;}
-        .skin-item { background: #333; padding: 8px; font-size: 12px; cursor: pointer; border-left: 4px solid #fff; display: flex; justify-content: space-between;}
-        .skin-item:hover { background: #444; }
-        .equipped-badge { background: #4caf50; padding: 2px 5px; border-radius: 3px; font-size: 10px; display: none; }
+        #unboxed-item { margin: 15px 0; font-family: 'Rajdhani', sans-serif; font-size: 26px; font-weight: 700; padding: 20px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); text-align: center; min-height: 30px; transition: 0.1s; letter-spacing: 1px;}
+        .skin-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; max-height: 400px; overflow-y: auto; padding-right: 10px; }
+        .skin-item { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); padding: 12px; font-size: 14px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: 0.2s; }
+        .skin-item:hover { background: rgba(255,255,255,0.08); transform: translateY(-2px); }
+        .skin-color-bar { width: 4px; height: 100%; border-radius: 2px; margin-right: 10px; }
+        .equipped-badge { background: #e5c158; color: #000; padding: 3px 8px; border-radius: 2px; font-size: 10px; font-weight: bold; display: none; }
         .skin-item.is-equipped .equipped-badge { display: block; }
+        .skin-item.is-equipped { border-color: rgba(229, 193, 88, 0.3); }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.4); }
 
     </style>
     <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
@@ -67,31 +119,32 @@
 <body>
     
     <div id="menu-layer">
-        <div style="display: flex; flex-direction: column; gap: 20px;">
-            <div id="main-menu" class="window active" style="width: 350px;">
-                <h2>Server Browser</h2>
-                <div style="background: #2a2a2a; padding: 10px; border: 1px solid #333; margin-bottom: 10px;">
-                    <strong>Dust II [Local]</strong><br><span style="font-size:12px; color:#aaa;">127.0.0.1 | Ping: 5ms</span>
-                </div>
-                <button onclick="window.connectToServer()" style="background: #4caf50; padding: 15px; font-size: 18px;">Connect to Server</button>
+        <div class="cs2-sidebar">
+            <div class="cs2-header">CS2 <span class="cs2-accent">WEBGL</span></div>
+            <button class="cs2-btn play" onclick="window.connectToServer()">Play Game</button>
+            <button class="cs2-btn" onclick="showTab('inventory')">Inventory</button>
+            <button class="cs2-btn" onclick="showTab('cases')">Store / Cases</button>
+            <div style="margin-top: auto; font-size: 12px; color: #666;">v1.0.5 - Opti AI</div>
+        </div>
+
+        <div class="cs2-content">
+            <div id="tab-inventory" class="cs2-panel" style="display: block; flex: 1;">
+                <h2 style="margin-top:0; color:#fff; font-family:'Rajdhani';">YOUR LOADOUT</h2>
+                <div id="inventory-list" class="skin-list"></div>
             </div>
 
-            <div id="case-menu" class="window active" style="width: 350px;">
-                <h2>Free Case Opener</h2>
-                <button id="btn-open-case" style="background: #e6b800; color: #000;">Open Case (Free)</button>
-                <div id="unboxed-item">...</div>
+            <div id="tab-cases" class="cs2-panel" style="display: none;">
+                <h2 style="margin-top:0; color:#fff; font-family:'Rajdhani';">WEAPON CASES</h2>
+                <button id="btn-open-case" class="cs2-btn" style="background: rgba(229, 193, 88, 0.2); border-color: #e5c158; color: #e5c158;">Unlock Weapon Case</button>
+                <div id="unboxed-item">Awaiting Unlock...</div>
             </div>
         </div>
 
-        <div id="inventory-menu" class="window active" style="width: 400px; height: 500px;">
-            <h2>Your Inventory</h2>
-            <p style="font-size: 12px; color: #aaa; margin-top: 0; text-align: center;">Click an item to equip it</p>
-            <div id="inventory-list" class="skin-list"></div>
-        </div>
+        <div id="preview-container"></div>
     </div>
 
     <div id="ui-layer">
-        <canvas id="minimap" width="150" height="150"></canvas>
+        <canvas id="minimap" width="160" height="160"></canvas>
         <div id="crosshair"></div>
         
         <div id="hud">
@@ -108,37 +161,37 @@
 
         <div id="chat-container">
             <div id="chat-log"></div>
-            <input type="text" id="chat-input" placeholder="Say something..." autocomplete="off">
+            <input type="text" id="chat-input" placeholder="Say to team..." autocomplete="off">
         </div>
 
         <div id="death-screen">
-            <h1>YOU DIED</h1>
-            <p>Respawning in 3 seconds...</p>
+            <h1>ELIMINATED</h1>
+            <p style="color: #ccc; font-family: 'Rajdhani'; font-size: 24px;">Deploying in 3 seconds...</p>
         </div>
 
-        <div id="pause-menu" class="window" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 300px;">
-            <h2>Paused</h2>
+        <div id="pause-menu" class="center-window">
+            <h2>Game Paused</h2>
             <div class="setting-group">
-                <label>Resolution Scale: <span id="res-val">100%</span></label>
+                <label>Resolution Scale: <span id="res-val" class="cs2-accent">100%</span></label>
                 <input type="range" id="res-slider" min="0.25" max="1.0" step="0.25" value="1.0">
             </div>
             <div class="setting-group">
-                <label>Sensitivity: <span id="sens-val">1.0</span></label>
+                <label>Sensitivity: <span id="sens-val" class="cs2-accent">1.0</span></label>
                 <input type="range" id="sens-slider" min="0.1" max="5.0" step="0.1" value="1.0">
             </div>
             <div class="setting-group" style="margin-bottom: 20px;">
-                <label>Base FOV: <span id="fov-val">75</span></label>
+                <label>Base FOV: <span id="fov-val" class="cs2-accent">75</span></label>
                 <input type="range" id="fov-slider" min="60" max="110" step="1" value="75">
             </div>
-            <button id="btn-resume" style="background-color: #4caf50;">Resume Game</button>
-            <button id="btn-disconnect" style="background-color: #ff3333;">Disconnect</button>
+            <button id="btn-resume" class="cs2-btn play">Resume Game</button>
+            <button id="btn-disconnect" class="cs2-btn" style="border-color: #ff4444; color: #ff4444;">Disconnect</button>
         </div>
 
-        <div id="buy-menu" class="window" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 300px;">
-            <h2>Buy Menu <span style="float:right; color:#33ff33;" id="buy-money">$800</span></h2>
-            <button class="buy-btn" data-weapon="AK-47" data-price="2700">AK-47 ($2700)</button>
-            <button class="buy-btn" data-weapon="Glock" data-price="200">Glock ($200)</button>
-            <button id="btn-close-buy" style="margin-top:15px;">Close (B)</button>
+        <div id="buy-menu" class="center-window">
+            <h2>Buy Gear <span style="float:right; color:#44ff44;" id="buy-money">$800</span></h2>
+            <button class="cs2-btn buy-btn" data-weapon="AK-47" data-price="2700">AK-47 <span style="float:right; color:#888;">$2700</span></button>
+            <button class="cs2-btn buy-btn" data-weapon="Glock" data-price="200">Glock <span style="float:right; color:#888;">$200</span></button>
+            <button id="btn-close-buy" class="cs2-btn" style="margin-top:10px;">Close Menu (B)</button>
         </div>
     </div>
 
@@ -151,8 +204,8 @@
 
         // --- SKINS, INVENTORY & STATE ---
         const SKIN_COLORS = [
-            { name: "Default", hex: 0x555555 }, { name: "Fade", hex: 0xff00ff }, { name: "Crimson Web", hex: 0xaa0000 },
-            { name: "Sapphire", hex: 0x0000ff }, { name: "Emerald", hex: 0x00ff00 }, { name: "Gold Arabesque", hex: 0xffaa00 },
+            { name: "Vanilla", hex: 0x555555 }, { name: "Fade", hex: 0xff00ff }, { name: "Crimson Web", hex: 0xaa0000 },
+            { name: "Sapphire", hex: 0x0000ff }, { name: "Emerald", hex: 0x00ff00 }, { name: "Lore", hex: 0xffaa00 },
             { name: "Asiimov", hex: 0xffffff }, { name: "Vulcan", hex: 0x0088ff }, { name: "Tiger Tooth", hex: 0xff8800 }
         ];
 
@@ -169,85 +222,14 @@
             activeSlot: 3
         };
 
-        // --- CASE SYSTEM WITH ANIMATION ---
-        let isOpeningCase = false;
-        document.getElementById('btn-open-case').addEventListener('click', () => {
-            if (isOpeningCase) return;
-            isOpeningCase = true;
-            
-            const btn = document.getElementById('btn-open-case');
-            const display = document.getElementById('unboxed-item');
-            btn.disabled = true;
-            btn.innerText = "Opening...";
+        // --- UI TAB LOGIC ---
+        window.showTab = (tabId) => {
+            document.getElementById('tab-inventory').style.display = 'none';
+            document.getElementById('tab-cases').style.display = 'none';
+            document.getElementById('tab-' + tabId).style.display = 'block';
+        };
 
-            let ticks = 0;
-            const rollInterval = setInterval(() => {
-                const tempSkin = SKIN_COLORS[Math.floor(Math.random() * SKIN_COLORS.length)];
-                const types = ['AK-47', 'Glock', 'Knife', 'Butterfly', 'Karambit'];
-                const tempType = types[Math.floor(Math.random() * types.length)];
-                
-                display.innerText = `${tempSkin.name} ${tempType}`;
-                display.style.color = '#' + tempSkin.hex.toString(16).padStart(6, '0');
-                display.style.transform = `scale(${1 + Math.random()*0.1})`;
-
-                ticks++;
-                if (ticks >= 20) {
-                    clearInterval(rollInterval);
-                    display.style.transform = `scale(1)`;
-                    
-                    // Final Roll
-                    const rand = Math.random();
-                    let type = 'AK-47';
-                    if (rand > 0.5) type = 'Glock';
-                    if (rand > 0.85) type = 'Knife';
-                    if (rand > 0.95) type = 'Butterfly';
-                    if (rand > 0.98) type = 'Karambit';
-
-                    const skin = SKIN_COLORS[Math.floor(Math.random() * SKIN_COLORS.length)];
-                    const item = { type, skin, id: Date.now().toString() };
-                    playerStats.inventory.push(item);
-                    
-                    display.innerText = `${skin.name} ${type}`;
-                    display.style.color = '#' + skin.hex.toString(16).padStart(6, '0');
-                    
-                    renderInventoryUI();
-                    isOpeningCase = false;
-                    btn.disabled = false;
-                    btn.innerText = "Open Case (Free)";
-                }
-            }, 100);
-        });
-
-        function renderInventoryUI() {
-            const list = document.getElementById('inventory-list');
-            list.innerHTML = '';
-            playerStats.inventory.forEach(item => {
-                const div = document.createElement('div');
-                
-                // Check if equipped
-                const isEquipped = (playerStats.equipped.primary?.id === item.id || 
-                                    playerStats.equipped.secondary?.id === item.id || 
-                                    playerStats.equipped.knife?.id === item.id);
-                
-                div.className = isEquipped ? 'skin-item is-equipped' : 'skin-item';
-                div.style.borderLeftColor = '#' + item.skin.hex.toString(16).padStart(6, '0');
-                
-                div.innerHTML = `<span>${item.skin.name} ${item.type}</span> <span class="equipped-badge">EQUIPPED</span>`;
-                
-                div.onclick = () => {
-                    if (['AK-47'].includes(item.type)) playerStats.equipped.primary = item;
-                    else if (['Glock'].includes(item.type)) playerStats.equipped.secondary = item;
-                    else playerStats.equipped.knife = item;
-                    
-                    renderInventoryUI(); // Re-render to update equipped badges
-                    if(gameState !== 'MAIN_MENU') { buildViewmodel(); updateInventoryHUD(); }
-                };
-                list.appendChild(div);
-            });
-        }
-        renderInventoryUI();
-
-        // --- THREE.JS SETUP ---
+        // --- THREE.JS SCENE SETUP ---
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x87CEEB); 
         scene.fog = new THREE.Fog(0x87CEEB, 0, 200);
@@ -256,20 +238,81 @@
         camera.rotation.order = 'YXZ'; 
         scene.add(camera); 
 
-        const renderer = new THREE.WebGLRenderer({ antialias: false }); 
+        const renderer = new THREE.WebGLRenderer({ antialias: true }); // True for cleaner preview models
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(1.0);
         renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         document.body.appendChild(renderer.domElement);
 
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
         scene.add(ambientLight);
-        const sunLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        const sunLight = new THREE.DirectionalLight(0xffffff, 1.2);
         sunLight.position.set(100, 200, 50);
         sunLight.castShadow = true;
+        sunLight.shadow.mapSize.width = 1024;
+        sunLight.shadow.mapSize.height = 1024;
         scene.add(sunLight);
 
-        // --- VIEWMODELS & VFX ---
+        // --- WEAPON MESH BUILDER ---
+        function createWeaponMesh(type, skinHex) {
+            const group = new THREE.Group();
+            const mat = new THREE.MeshLambertMaterial({ color: skinHex });
+            const darkMat = new THREE.MeshLambertMaterial({ color: 0x222222 });
+
+            if (type === 'AK-47') {
+                const body = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.15, 0.5), mat);
+                const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.4), darkMat);
+                barrel.rotation.x = Math.PI/2; barrel.position.set(0, 0.05, -0.4);
+                const mag = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.2, 0.1), darkMat);
+                mag.position.set(0, -0.15, -0.1); mag.rotation.x = 0.2;
+                group.add(body, barrel, mag);
+            } else if (type === 'Glock') {
+                const slide = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.06, 0.25), mat);
+                const grip = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.15, 0.08), darkMat);
+                grip.position.set(0, -0.1, 0.05); grip.rotation.x = 0.2;
+                group.add(slide, grip);
+            } else if (type === 'Knife') {
+                const handle = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.15), darkMat);
+                const blade = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.05, 0.2), mat);
+                blade.position.set(0, 0, -0.15);
+                group.add(handle, blade);
+            } else if (type === 'Karambit') {
+                const handle = new THREE.Mesh(new THREE.TorusGeometry(0.03, 0.01, 8, 16), darkMat);
+                handle.position.set(0, 0, 0.1);
+                const blade = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.08, 0.15), mat);
+                blade.position.set(0, -0.05, -0.05); blade.rotation.x = 0.5;
+                group.add(handle, blade);
+            } else if (type === 'Butterfly') {
+                const h1 = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.15), darkMat); h1.position.set(0.02, 0, 0.05); h1.rotation.y = 0.2;
+                const h2 = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.15), darkMat); h2.position.set(-0.02, 0, 0.05); h2.rotation.y = -0.2;
+                const blade = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.03, 0.2), mat); blade.position.set(0, 0, -0.1);
+                group.add(h1, h2, blade);
+            }
+            return group;
+        }
+
+        // --- 3D MENU PREVIEW SYSTEM ---
+        const previewModelGroup = new THREE.Group();
+        // Place it directly in front of the camera to render over the background
+        previewModelGroup.position.set(0.5, -0.1, -1.0); 
+        camera.add(previewModelGroup);
+
+        function updatePreviewModel(item) {
+            while(previewModelGroup.children.length > 0) previewModelGroup.remove(previewModelGroup.children[0]);
+            if(!item) return;
+            const mesh = createWeaponMesh(item.type, item.skin.hex);
+            
+            // Adjust scale/rotation for nice showcase
+            if(item.type === 'AK-47') mesh.scale.set(0.8, 0.8, 0.8);
+            else mesh.scale.set(1.5, 1.5, 1.5);
+            
+            mesh.rotation.y = -Math.PI / 4;
+            previewModelGroup.add(mesh);
+        }
+        updatePreviewModel(playerStats.equipped.knife); // Default preview
+
+        // --- IN-GAME VIEWMODEL & VFX ---
         let viewmodel = new THREE.Group();
         camera.add(viewmodel);
         viewmodel.position.set(0.25, -0.25, -0.5);
@@ -282,48 +325,176 @@
 
         function buildViewmodel() {
             while(viewmodel.children.length > 2) viewmodel.remove(viewmodel.children[2]);
-            
-            let activeItem = playerStats.activeSlot === 1 ? playerStats.equipped.primary : 
-                             (playerStats.activeSlot === 2 ? playerStats.equipped.secondary : playerStats.equipped.knife);
-
+            let activeItem = playerStats.activeSlot === 1 ? playerStats.equipped.primary : (playerStats.activeSlot === 2 ? playerStats.equipped.secondary : playerStats.equipped.knife);
             if (!activeItem) return;
 
-            const mat = new THREE.MeshLambertMaterial({ color: activeItem.skin.hex });
-            const darkMat = new THREE.MeshLambertMaterial({ color: 0x222222 });
+            const mesh = createWeaponMesh(activeItem.type, activeItem.skin.hex);
+            viewmodel.add(mesh);
 
-            if (activeItem.type === 'AK-47') {
-                const body = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.15, 0.5), mat);
-                const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.4), darkMat);
-                barrel.rotation.x = Math.PI/2; barrel.position.set(0, 0.05, -0.4);
-                const mag = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.2, 0.1), darkMat);
-                mag.position.set(0, -0.15, -0.1); mag.rotation.x = 0.2;
-                viewmodel.add(body, barrel, mag);
-                flashMesh.position.set(0, 0.05, -0.65); flashLight.position.set(0, 0.05, -0.65);
-            } else if (activeItem.type === 'Glock') {
-                const slide = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.06, 0.25), mat);
-                const grip = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.15, 0.08), darkMat);
-                grip.position.set(0, -0.1, 0.05); grip.rotation.x = 0.2;
-                viewmodel.add(slide, grip);
-                flashMesh.position.set(0, 0, -0.15); flashLight.position.set(0, 0, -0.15);
-            } else if (activeItem.type === 'Knife') {
-                const handle = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.15), darkMat);
-                const blade = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.05, 0.2), mat);
-                blade.position.set(0, 0, -0.15);
-                viewmodel.add(handle, blade);
-            } else if (activeItem.type === 'Karambit') {
-                const handle = new THREE.Mesh(new THREE.TorusGeometry(0.03, 0.01, 8, 16), darkMat);
-                handle.position.set(0, 0, 0.1);
-                const blade = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.08, 0.15), mat);
-                blade.position.set(0, -0.05, -0.05); blade.rotation.x = 0.5;
-                viewmodel.add(handle, blade);
-            } else if (activeItem.type === 'Butterfly') {
-                const h1 = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.15), darkMat); h1.position.set(0.02, 0, 0.05); h1.rotation.y = 0.2;
-                const h2 = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.15), darkMat); h2.position.set(-0.02, 0, 0.05); h2.rotation.y = -0.2;
-                const blade = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.03, 0.2), mat); blade.position.set(0, 0, -0.1);
-                viewmodel.add(h1, h2, blade);
-            }
+            // Align flashes
+            if (activeItem.type === 'AK-47') { flashMesh.position.set(0, 0.05, -0.65); flashLight.position.set(0, 0.05, -0.65); }
+            else if (activeItem.type === 'Glock') { flashMesh.position.set(0, 0, -0.15); flashLight.position.set(0, 0, -0.15); }
         }
 
+        // --- CASE SYSTEM WITH ANIMATION ---
+        let isOpeningCase = false;
+        document.getElementById('btn-open-case').addEventListener('click', () => {
+            if (isOpeningCase) return;
+            isOpeningCase = true;
+            
+            const btn = document.getElementById('btn-open-case');
+            const display = document.getElementById('unboxed-item');
+            btn.disabled = true;
+            btn.innerText = "Decrypting...";
+
+            let ticks = 0;
+            const rollInterval = setInterval(() => {
+                const tempSkin = SKIN_COLORS[Math.floor(Math.random() * SKIN_COLORS.length)];
+                const types = ['AK-47', 'Glock', 'Knife', 'Butterfly', 'Karambit'];
+                const tempType = types[Math.floor(Math.random() * types.length)];
+                
+                display.innerText = `${tempSkin.name} ${tempType}`;
+                display.style.color = '#' + tempSkin.hex.toString(16).padStart(6, '0');
+                
+                // Show rapid preview update
+                updatePreviewModel({ type: tempType, skin: tempSkin });
+
+                ticks++;
+                if (ticks >= 20) {
+                    clearInterval(rollInterval);
+                    
+                    const rand = Math.random();
+                    let type = 'AK-47';
+                    if (rand > 0.5) type = 'Glock';
+                    if (rand > 0.85) type = 'Knife';
+                    if (rand > 0.95) type = 'Butterfly';
+                    if (rand > 0.98) type = 'Karambit';
+
+                    const skin = SKIN_COLORS[Math.floor(Math.random() * SKIN_COLORS.length)];
+                    const item = { type, skin, id: Date.now().toString() };
+                    playerStats.inventory.push(item);
+                    
+                    display.innerText = `UNLOCKED: ${skin.name} ${type}`;
+                    display.style.color = '#' + skin.hex.toString(16).padStart(6, '0');
+                    
+                    updatePreviewModel(item);
+                    renderInventoryUI();
+                    isOpeningCase = false;
+                    btn.disabled = false;
+                    btn.innerText = "Unlock Weapon Case";
+                }
+            }, 100);
+        });
+
+        function renderInventoryUI() {
+            const list = document.getElementById('inventory-list');
+            list.innerHTML = '';
+            playerStats.inventory.forEach(item => {
+                const div = document.createElement('div');
+                const isEquipped = (playerStats.equipped.primary?.id === item.id || playerStats.equipped.secondary?.id === item.id || playerStats.equipped.knife?.id === item.id);
+                
+                div.className = isEquipped ? 'skin-item is-equipped' : 'skin-item';
+                div.innerHTML = `
+                    <div style="display:flex; align-items:center;">
+                        <div class="skin-color-bar" style="background: #${item.skin.hex.toString(16).padStart(6, '0')}"></div>
+                        <span style="font-weight:bold; color:#fff;">${item.type}</span>
+                        <span style="margin-left:5px; color:#aaa;">| ${item.skin.name}</span>
+                    </div>
+                    <span class="equipped-badge">EQ</span>
+                `;
+                
+                div.onclick = () => {
+                    if (['AK-47'].includes(item.type)) playerStats.equipped.primary = item;
+                    else if (['Glock'].includes(item.type)) playerStats.equipped.secondary = item;
+                    else playerStats.equipped.knife = item;
+                    
+                    updatePreviewModel(item);
+                    renderInventoryUI(); 
+                    if(gameState !== 'MAIN_MENU') { buildViewmodel(); updateInventoryHUD(); }
+                };
+                list.appendChild(div);
+            });
+        }
+        renderInventoryUI();
+
+        // --- MAP, PHYSICS, BOTS ---
+        const clock = new THREE.Clock();
+        const worldOctree = new Octree();
+        let spawnPoint = new THREE.Vector3(0, 50, 0);
+
+        const playerCollider = new Capsule(new THREE.Vector3(), new THREE.Vector3(0, 0.38, 0), 0.35);
+        const playerVelocity = new THREE.Vector3();
+        let playerOnFloor = false;
+        let mapLoaded = false;
+
+        const bots = [];
+        const botGeo = new THREE.CapsuleGeometry(0.35, 0.38, 4, 8);
+        const botMat = new THREE.MeshLambertMaterial({ color: 0xff4444 }); 
+
+        const loader = new GLTFLoader();
+        loader.load('./dust2/scene.gltf', (gltf) => {
+            const map = gltf.scene;
+            map.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; c.material = new THREE.MeshLambertMaterial({ map: c.material.map }); } });
+            scene.add(map);
+            worldOctree.fromGraphNode(map);
+            
+            const box = new THREE.Box3().setFromObject(map);
+            spawnPoint.copy(box.getCenter(new THREE.Vector3())); spawnPoint.y += 5;
+            mapLoaded = true;
+
+            // Spawn Bots
+            for (let i = 0; i < 3; i++) {
+                const mesh = new THREE.Mesh(botGeo, botMat); scene.add(mesh);
+                bots.push({ health: 100, collider: new Capsule(new THREE.Vector3(), new THREE.Vector3(0, 0.38, 0), 0.35), mesh, velocity: new THREE.Vector3(), direction: new THREE.Vector3(1,0,0), onFloor: false, timer: 0 });
+            }
+        });
+
+        // --- MINIMAP RADAR ---
+        const minimapCanvas = document.getElementById('minimap');
+        const ctx = minimapCanvas.getContext('2d');
+
+        function drawRadar() {
+            if (gameState !== 'PLAYING') return;
+            
+            ctx.clearRect(0, 0, 160, 160);
+            
+            // Background
+            ctx.fillStyle = 'rgba(15, 15, 20, 0.8)';
+            ctx.beginPath(); ctx.arc(80, 80, 80, 0, Math.PI * 2); ctx.fill();
+
+            // Draw Lines
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+            ctx.beginPath(); ctx.moveTo(80, 0); ctx.lineTo(80, 160); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, 80); ctx.lineTo(160, 80); ctx.stroke();
+
+            // Player Dot
+            ctx.fillStyle = '#44ff44';
+            ctx.beginPath(); ctx.arc(80, 80, 4, 0, Math.PI * 2); ctx.fill();
+
+            const pDir = new THREE.Vector3();
+            camera.getWorldDirection(pDir);
+            const yaw = Math.atan2(pDir.x, pDir.z);
+
+            // Draw Bots
+            ctx.fillStyle = '#ff4444';
+            bots.forEach(bot => {
+                const dx = bot.collider.start.x - playerCollider.start.x;
+                const dz = bot.collider.start.z - playerCollider.start.z;
+                
+                const cos = Math.cos(-yaw), sin = Math.sin(-yaw);
+                const rx = dx * cos - dz * sin;
+                const rz = dx * sin + dz * cos;
+
+                const px = 80 + rx * 2.5; // Scale
+                const py = 80 + rz * 2.5;
+
+                if (Math.hypot(rx * 2.5, rz * 2.5) < 75) {
+                    ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI * 2); ctx.fill();
+                }
+            });
+        }
+
+        // --- WEAPON MECHANICS ---
         const tracers = [];
         const raycaster = new THREE.Raycaster();
 
@@ -332,7 +503,7 @@
             const activeType = playerStats.activeSlot === 1 ? playerStats.equipped.primary?.type : (playerStats.activeSlot === 2 ? playerStats.equipped.secondary?.type : null);
             if (!activeType) return; 
 
-            camera.rotation.x += 0.02; 
+            camera.rotation.x += 0.02; // Recoil
             viewmodel.position.z += 0.05;
 
             flashLight.intensity = 2; flashMesh.visible = true; flashMesh.rotation.z = Math.random() * Math.PI;
@@ -359,96 +530,10 @@
             }
 
             const startPoint = new THREE.Vector3(); viewmodel.getWorldPosition(startPoint); startPoint.y -= 0.1; 
-            const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([startPoint, hitPoint]), new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true }));
+            const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([startPoint, hitPoint]), new THREE.LineBasicMaterial({ color: 0xffddaa, transparent: true }));
             scene.add(line); tracers.push({ mesh: line, life: 1.0 });
         }
         document.addEventListener('mousedown', (e) => { if (e.button === 0) fireWeapon(); });
-
-        // --- MAP, PHYSICS, BOTS ---
-        const clock = new THREE.Clock();
-        const worldOctree = new Octree();
-        let spawnPoint = new THREE.Vector3(0, 50, 0);
-
-        const playerCollider = new Capsule(new THREE.Vector3(), new THREE.Vector3(0, 0.38, 0), 0.35);
-        const playerVelocity = new THREE.Vector3();
-        let playerOnFloor = false;
-        let mapLoaded = false;
-
-        const bots = [];
-        const botGeo = new THREE.CapsuleGeometry(0.35, 0.38, 4, 8);
-        const botMat = new THREE.MeshLambertMaterial({ color: 0xff3333 }); 
-
-        const loader = new GLTFLoader();
-        loader.load('./dust2/scene.gltf', (gltf) => {
-            const map = gltf.scene;
-            map.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; c.material = new THREE.MeshLambertMaterial({ map: c.material.map }); } });
-            scene.add(map);
-            worldOctree.fromGraphNode(map);
-            
-            const box = new THREE.Box3().setFromObject(map);
-            spawnPoint.copy(box.getCenter(new THREE.Vector3())); spawnPoint.y += 5;
-            mapLoaded = true;
-
-            for (let i = 0; i < 3; i++) {
-                const mesh = new THREE.Mesh(botGeo, botMat); scene.add(mesh);
-                bots.push({ health: 100, collider: new Capsule(new THREE.Vector3(), new THREE.Vector3(0, 0.38, 0), 0.35), mesh, velocity: new THREE.Vector3(), direction: new THREE.Vector3(1,0,0), onFloor: false, timer: 0 });
-            }
-        });
-
-        // --- MINIMAP RADAR ---
-        const minimapCanvas = document.getElementById('minimap');
-        const ctx = minimapCanvas.getContext('2d');
-
-        function drawRadar() {
-            if (gameState !== 'PLAYING') return;
-            
-            ctx.clearRect(0, 0, 150, 150);
-            
-            // Background
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-            ctx.beginPath();
-            ctx.arc(75, 75, 75, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Draw Cross/Lines
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-            ctx.beginPath(); ctx.moveTo(75, 0); ctx.lineTo(75, 150); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(0, 75); ctx.lineTo(150, 75); ctx.stroke();
-
-            // Player Dot
-            ctx.fillStyle = '#0f0';
-            ctx.beginPath(); ctx.arc(75, 75, 4, 0, Math.PI * 2); ctx.fill();
-
-            // Get player yaw angle to rotate the map
-            const pDir = new THREE.Vector3();
-            camera.getWorldDirection(pDir);
-            const yaw = Math.atan2(pDir.x, pDir.z);
-
-            // Draw Bots
-            ctx.fillStyle = '#f00';
-            bots.forEach(bot => {
-                // Relative position
-                const dx = bot.collider.start.x - playerCollider.start.x;
-                const dz = bot.collider.start.z - playerCollider.start.z;
-                
-                // Rotate according to player camera
-                const cos = Math.cos(-yaw);
-                const sin = Math.sin(-yaw);
-                const rx = dx * cos - dz * sin;
-                const rz = dx * sin + dz * cos;
-
-                // Scale (1 unit = 2 pixels on radar)
-                const px = 75 + rx * 2;
-                const py = 75 + rz * 2;
-
-                // Only draw if within circle
-                if (Math.hypot(rx * 2, rz * 2) < 70) {
-                    ctx.beginPath();
-                    ctx.arc(px, py, 3, 0, Math.PI * 2);
-                    ctx.fill();
-                }
-            });
-        }
 
         // --- MENUS & CONTROLS ---
         const controls = new PointerLockControls(camera, document.body);
@@ -456,6 +541,9 @@
 
         window.connectToServer = () => {
             if (!mapLoaded) return alert("Waiting for map to finish loading...");
+            previewModelGroup.visible = false; // Hide menu showcase
+            buildViewmodel();
+
             document.getElementById('menu-layer').style.display = 'none';
             document.getElementById('minimap').style.display = 'block';
             document.getElementById('hud').style.display = 'flex';
@@ -465,7 +553,7 @@
             
             playerStats.team = Math.random() > 0.5 ? 'TERRORIST' : 'COUNTER-TERRORIST';
             document.getElementById('hud-team').innerText = `TEAM: ${playerStats.team}`;
-            document.getElementById('hud-team').style.color = playerStats.team === 'TERRORIST' ? '#e6b800' : '#6699ff';
+            document.getElementById('hud-team').style.color = playerStats.team === 'TERRORIST' ? '#e5c158' : '#6699ff';
 
             bots.forEach((b,i) => { b.collider.start.copy(spawnPoint); b.collider.start.x += i*2; b.collider.end.copy(b.collider.start).y += 0.38; });
             
@@ -479,18 +567,15 @@
         document.getElementById('btn-disconnect').onclick = () => location.reload();
         document.getElementById('btn-close-buy').onclick = () => controls.lock();
 
-        // Settings Logic
         document.getElementById('res-slider').oninput = (e) => { renderer.setPixelRatio(window.devicePixelRatio * e.target.value); document.getElementById('res-val').innerText = (e.target.value * 100) + '%'; };
         document.getElementById('sens-slider').oninput = (e) => { controls.pointerSpeed = e.target.value; document.getElementById('sens-val').innerText = e.target.value; };
         document.getElementById('fov-slider').oninput = (e) => { baseFov = parseInt(e.target.value); document.getElementById('fov-val').innerText = baseFov; camera.fov = baseFov; camera.updateProjectionMatrix(); };
 
-        // Buy Logic
         document.querySelectorAll('.buy-btn').forEach(btn => btn.onclick = (e) => {
             const price = parseInt(e.target.getAttribute('data-price'));
             const wep = e.target.getAttribute('data-weapon');
             if (playerStats.money >= price) {
                 playerStats.money -= price;
-                
                 const item = { type: wep, skin: SKIN_COLORS[0], id: Date.now().toString() };
                 playerStats.inventory.push(item);
 
@@ -507,7 +592,7 @@
             if (e.code === 'Enter') {
                 if (document.activeElement === chatInput) {
                     if (chatInput.value.trim() !== '') {
-                        const div = document.createElement('div'); div.innerHTML = `<span style="color:#ffcc00">${playerStats.team}:</span> ${chatInput.value}`;
+                        const div = document.createElement('div'); div.innerHTML = `<span style="color:${playerStats.team==='TERRORIST'?'#e5c158':'#6699ff'}; font-weight:bold;">${playerStats.team}:</span> ${chatInput.value}`;
                         document.getElementById('chat-log').appendChild(div); document.getElementById('chat-log').scrollTop = 999;
                     }
                     chatInput.value = ''; chatInput.style.display = 'none'; chatInput.blur(); controls.lock();
@@ -525,7 +610,7 @@
         });
         document.addEventListener('keyup', (e) => keyStates[e.code] = false);
 
-        // --- HEALTH & HUD LOGIC ---
+        // --- HEALTH LOGIC ---
         function updateHUD() {
             document.getElementById('hud-health').innerText = `+ ${playerStats.health}`;
             document.getElementById('hud-money').innerText = `$ ${playerStats.money}`;
@@ -560,17 +645,19 @@
             gameState = 'PLAYING'; controls.lock();
         }
 
-        // --- GAME LOOP ---
+        // --- GAME LOOP & SMART AI ---
         function applyCollisions(collider, velocity) {
             const result = worldOctree.capsuleIntersect(collider);
             let onFloor = false;
+            let hitNormal = null;
             if (result) {
                 onFloor = result.normal.y > 0.5;
+                hitNormal = result.normal;
                 if (!onFloor) velocity.addScaledVector(result.normal, -result.normal.dot(velocity));
                 else velocity.y = Math.max(0, velocity.y);
                 collider.translate(result.normal.multiplyScalar(result.depth));
             }
-            return onFloor;
+            return { onFloor, hitNormal };
         }
 
         let swayAmount = 0;
@@ -578,6 +665,12 @@
             requestAnimationFrame(animate);
             const delta = Math.min(0.05, clock.getDelta());
 
+            // Rotate Preview Model in Main Menu
+            if (gameState === 'MAIN_MENU') {
+                previewModelGroup.rotation.y += delta * 0.5;
+            }
+
+            // Tracers
             for (let i = tracers.length - 1; i >= 0; i--) {
                 tracers[i].life -= delta * 5; tracers[i].mesh.material.opacity = tracers[i].life;
                 if (tracers[i].life <= 0) { scene.remove(tracers[i].mesh); tracers.splice(i, 1); }
@@ -586,6 +679,8 @@
             if (mapLoaded && gameState !== 'MAIN_MENU') {
                 const subDelta = delta / 5;
                 for (let i = 0; i < 5; i++) {
+                    
+                    // --- PLAYER PHYSICS ---
                     if (gameState === 'PLAYING') {
                         const speed = playerOnFloor ? (keyStates['ShiftLeft'] ? 55.0 : 28.0) : 12.0;
                         const dir = new THREE.Vector3(); camera.getWorldDirection(dir); dir.y = 0; dir.normalize();
@@ -609,25 +704,57 @@
                     if (hSpeed > 55.0) { playerVelocity.x *= 55.0/hSpeed; playerVelocity.z *= 55.0/hSpeed; }
 
                     playerCollider.translate(playerVelocity.clone().multiplyScalar(subDelta));
-                    playerOnFloor = applyCollisions(playerCollider, playerVelocity);
+                    const pCol = applyCollisions(playerCollider, playerVelocity);
+                    playerOnFloor = pCol.onFloor;
                     camera.position.copy(playerCollider.end);
 
                     if (camera.position.y < -50 && gameState === 'PLAYING') takeDamage();
 
+                    // --- SMART AI PHYSICS & HUNTING ---
                     bots.forEach(bot => {
                         bot.timer -= subDelta;
-                        if (bot.timer <= 0) { bot.direction.set(Math.random()-0.5, 0, Math.random()-0.5).normalize(); bot.timer = 2; }
+                        
+                        // Distance to player
+                        const toPlayer = new THREE.Vector3().subVectors(playerCollider.start, bot.collider.start);
+                        const distToPlayer = toPlayer.length();
+
+                        if (distToPlayer < 40 && gameState === 'PLAYING') {
+                            // HUNT MODE: Look at player
+                            bot.direction.copy(toPlayer).normalize();
+                            bot.direction.y = 0;
+                            bot.timer = 1.0; // Keep chasing state refreshed
+                        } else if (bot.timer <= 0) {
+                            // WANDER MODE
+                            bot.direction.set(Math.random()-0.5, 0, Math.random()-0.5).normalize(); 
+                            bot.timer = 2; 
+                        }
+
                         let bdamp = Math.exp(-15 * subDelta) - 1;
                         if (!bot.onFloor) { bot.velocity.y -= 30.0 * subDelta; bdamp *= 0.05; }
                         else bot.velocity.add(bot.direction.clone().multiplyScalar(28.0 * subDelta));
+                        
                         bot.velocity.addScaledVector(bot.velocity, bdamp);
                         bot.collider.translate(bot.velocity.clone().multiplyScalar(subDelta));
-                        bot.onFloor = applyCollisions(bot.collider, bot.velocity);
+                        
+                        const bCol = applyCollisions(bot.collider, bot.velocity);
+                        bot.onFloor = bCol.onFloor;
+
+                        // NEW AI WALL FIX: If they hit a wall (normal.y < 0.5), slide/steer away
+                        if (bCol.hitNormal && !bot.onFloor) {
+                            // Calculate tangent vector along the wall
+                            const up = new THREE.Vector3(0,1,0);
+                            const tangent = new THREE.Vector3().crossVectors(bCol.hitNormal, up).normalize();
+                            
+                            // Pick the tangent direction that is closest to their original goal
+                            if (tangent.dot(bot.direction) < 0) tangent.negate();
+                            
+                            bot.direction.lerp(tangent, 0.5).normalize();
+                        }
+
                         bot.mesh.position.copy(bot.collider.start); bot.mesh.position.y += 0.19;
                     });
                 }
                 
-                // Draw Radar
                 drawRadar();
             }
             renderer.render(scene, camera);
