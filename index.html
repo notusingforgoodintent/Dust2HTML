@@ -3,15 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CS2 WebGL - The Complete Client</title>
+    <title>CS2 WebGL - Radar & Inventory Update</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #111; font-family: 'Segoe UI', Tahoma, sans-serif; color: #ddd; user-select: none; }
         
         /* UI Layers */
         #ui-layer { position: absolute; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
-        #menu-layer { position: absolute; width: 100%; height: 100%; background: rgba(15,15,15,0.95); z-index: 20; display: flex; align-items: center; justify-content: center; gap: 20px;}
+        #menu-layer { position: absolute; width: 100%; height: 100%; background: rgba(15,15,15,0.95); z-index: 20; display: flex; align-items: flex-start; justify-content: center; padding-top: 50px; gap: 20px;}
         
         #crosshair { position: absolute; top: 50%; left: 50%; width: 4px; height: 4px; background-color: #0f0; transform: translate(-50%, -50%); display: none; }
+
+        /* Minimap / Radar */
+        #minimap { position: absolute; top: 20px; left: 20px; width: 150px; height: 150px; background: rgba(0, 0, 0, 0.6); border: 2px solid #555; border-radius: 50%; display: none; }
 
         /* HUD & Inventory */
         #hud { position: absolute; bottom: 20px; left: 20px; display: none; flex-direction: column; gap: 5px; }
@@ -40,17 +43,20 @@
         
         button { background-color: #333; color: white; border: 1px solid #555; padding: 10px; cursor: pointer; transition: 0.1s; font-size: 14px; font-weight: bold;}
         button:hover { background-color: #666; }
+        button:disabled { background-color: #222; color: #555; cursor: not-allowed; }
         input[type="text"] { padding: 10px; background: #222; border: 1px solid #444; color: white; }
 
         .setting-group { display: flex; flex-direction: column; margin-bottom: 5px; font-size: 13px; color: #ccc; }
         .setting-group label { margin-bottom: 5px; }
         .setting-group input[type="range"] { width: 100%; cursor: pointer; }
 
-        /* Cases & Skins */
-        #unboxed-item { margin: 10px 0; font-size: 20px; font-weight: bold; padding: 15px; background: #222; border: 2px dashed #555; text-align: center; min-height: 25px;}
-        .skin-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; max-height: 200px; overflow-y: auto;}
-        .skin-item { background: #333; padding: 8px; font-size: 12px; cursor: pointer; border-left: 4px solid #fff;}
+        /* Cases & Skins UI */
+        #unboxed-item { margin: 10px 0; font-size: 20px; font-weight: bold; padding: 15px; background: #222; border: 2px dashed #555; text-align: center; min-height: 25px; transition: 0.1s;}
+        .skin-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; max-height: 250px; overflow-y: auto; padding-right: 5px;}
+        .skin-item { background: #333; padding: 8px; font-size: 12px; cursor: pointer; border-left: 4px solid #fff; display: flex; justify-content: space-between;}
         .skin-item:hover { background: #444; }
+        .equipped-badge { background: #4caf50; padding: 2px 5px; border-radius: 3px; font-size: 10px; display: none; }
+        .skin-item.is-equipped .equipped-badge { display: block; }
 
     </style>
     <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
@@ -61,24 +67,31 @@
 <body>
     
     <div id="menu-layer">
-        <div id="main-menu" class="window active" style="width: 350px;">
-            <h2>Server Browser</h2>
-            <div style="background: #2a2a2a; padding: 10px; border: 1px solid #333; margin-bottom: 10px;">
-                <strong>Dust II [Local]</strong><br><span style="font-size:12px; color:#aaa;">127.0.0.1 | Ping: 5ms</span>
+        <div style="display: flex; flex-direction: column; gap: 20px;">
+            <div id="main-menu" class="window active" style="width: 350px;">
+                <h2>Server Browser</h2>
+                <div style="background: #2a2a2a; padding: 10px; border: 1px solid #333; margin-bottom: 10px;">
+                    <strong>Dust II [Local]</strong><br><span style="font-size:12px; color:#aaa;">127.0.0.1 | Ping: 5ms</span>
+                </div>
+                <button onclick="window.connectToServer()" style="background: #4caf50; padding: 15px; font-size: 18px;">Connect to Server</button>
             </div>
-            <button onclick="window.connectToServer()" style="background: #4caf50; padding: 15px; font-size: 18px;">Connect to Server</button>
+
+            <div id="case-menu" class="window active" style="width: 350px;">
+                <h2>Free Case Opener</h2>
+                <button id="btn-open-case" style="background: #e6b800; color: #000;">Open Case (Free)</button>
+                <div id="unboxed-item">...</div>
+            </div>
         </div>
 
-        <div id="case-menu" class="window active" style="width: 400px;">
-            <h2>Free Case Opener</h2>
-            <button id="btn-open-case" style="background: #e6b800; color: #000;">Open Case (Free)</button>
-            <div id="unboxed-item">...</div>
-            <h3 style="margin: 0; font-size: 14px; border-bottom: 1px solid #444;">Your Inventory (Click to Equip)</h3>
+        <div id="inventory-menu" class="window active" style="width: 400px; height: 500px;">
+            <h2>Your Inventory</h2>
+            <p style="font-size: 12px; color: #aaa; margin-top: 0; text-align: center;">Click an item to equip it</p>
             <div id="inventory-list" class="skin-list"></div>
         </div>
     </div>
 
     <div id="ui-layer">
+        <canvas id="minimap" width="150" height="150"></canvas>
         <div id="crosshair"></div>
         
         <div id="hud">
@@ -136,7 +149,7 @@
         import { Octree } from 'three/addons/math/Octree.js';
         import { Capsule } from 'three/addons/math/Capsule.js';
 
-        // --- SKINS & STATE ---
+        // --- SKINS, INVENTORY & STATE ---
         const SKIN_COLORS = [
             { name: "Default", hex: 0x555555 }, { name: "Fade", hex: 0xff00ff }, { name: "Crimson Web", hex: 0xaa0000 },
             { name: "Sapphire", hex: 0x0000ff }, { name: "Emerald", hex: 0x00ff00 }, { name: "Gold Arabesque", hex: 0xffaa00 },
@@ -148,29 +161,61 @@
 
         const playerStats = {
             health: 100, money: 800, team: 'UNASSIGNED',
-            equipped: { primary: null, secondary: { type: 'Glock', skin: SKIN_COLORS[0] }, knife: { type: 'Knife', skin: SKIN_COLORS[0] } },
-            inventory: [],
+            equipped: { primary: null, secondary: { type: 'Glock', skin: SKIN_COLORS[0], id: 'base2' }, knife: { type: 'Knife', skin: SKIN_COLORS[0], id: 'base3' } },
+            inventory: [
+                { type: 'Glock', skin: SKIN_COLORS[0], id: 'base2' },
+                { type: 'Knife', skin: SKIN_COLORS[0], id: 'base3' }
+            ],
             activeSlot: 3
         };
 
-        // --- CASE SYSTEM ---
+        // --- CASE SYSTEM WITH ANIMATION ---
+        let isOpeningCase = false;
         document.getElementById('btn-open-case').addEventListener('click', () => {
-            const rand = Math.random();
-            let type = 'AK-47';
-            if (rand > 0.5) type = 'Glock';
-            if (rand > 0.85) type = 'Knife';
-            if (rand > 0.95) type = 'Butterfly';
-            if (rand > 0.98) type = 'Karambit';
-
-            const skin = SKIN_COLORS[Math.floor(Math.random() * SKIN_COLORS.length)];
-            const item = { type, skin };
-            playerStats.inventory.push(item);
+            if (isOpeningCase) return;
+            isOpeningCase = true;
             
+            const btn = document.getElementById('btn-open-case');
             const display = document.getElementById('unboxed-item');
-            display.innerText = `${skin.name} ${type}`;
-            display.style.color = '#' + skin.hex.toString(16).padStart(6, '0');
-            
-            renderInventoryUI();
+            btn.disabled = true;
+            btn.innerText = "Opening...";
+
+            let ticks = 0;
+            const rollInterval = setInterval(() => {
+                const tempSkin = SKIN_COLORS[Math.floor(Math.random() * SKIN_COLORS.length)];
+                const types = ['AK-47', 'Glock', 'Knife', 'Butterfly', 'Karambit'];
+                const tempType = types[Math.floor(Math.random() * types.length)];
+                
+                display.innerText = `${tempSkin.name} ${tempType}`;
+                display.style.color = '#' + tempSkin.hex.toString(16).padStart(6, '0');
+                display.style.transform = `scale(${1 + Math.random()*0.1})`;
+
+                ticks++;
+                if (ticks >= 20) {
+                    clearInterval(rollInterval);
+                    display.style.transform = `scale(1)`;
+                    
+                    // Final Roll
+                    const rand = Math.random();
+                    let type = 'AK-47';
+                    if (rand > 0.5) type = 'Glock';
+                    if (rand > 0.85) type = 'Knife';
+                    if (rand > 0.95) type = 'Butterfly';
+                    if (rand > 0.98) type = 'Karambit';
+
+                    const skin = SKIN_COLORS[Math.floor(Math.random() * SKIN_COLORS.length)];
+                    const item = { type, skin, id: Date.now().toString() };
+                    playerStats.inventory.push(item);
+                    
+                    display.innerText = `${skin.name} ${type}`;
+                    display.style.color = '#' + skin.hex.toString(16).padStart(6, '0');
+                    
+                    renderInventoryUI();
+                    isOpeningCase = false;
+                    btn.disabled = false;
+                    btn.innerText = "Open Case (Free)";
+                }
+            }, 100);
         });
 
         function renderInventoryUI() {
@@ -178,18 +223,29 @@
             list.innerHTML = '';
             playerStats.inventory.forEach(item => {
                 const div = document.createElement('div');
-                div.className = 'skin-item';
+                
+                // Check if equipped
+                const isEquipped = (playerStats.equipped.primary?.id === item.id || 
+                                    playerStats.equipped.secondary?.id === item.id || 
+                                    playerStats.equipped.knife?.id === item.id);
+                
+                div.className = isEquipped ? 'skin-item is-equipped' : 'skin-item';
                 div.style.borderLeftColor = '#' + item.skin.hex.toString(16).padStart(6, '0');
-                div.innerText = `${item.skin.name} ${item.type}`;
+                
+                div.innerHTML = `<span>${item.skin.name} ${item.type}</span> <span class="equipped-badge">EQUIPPED</span>`;
+                
                 div.onclick = () => {
                     if (['AK-47'].includes(item.type)) playerStats.equipped.primary = item;
                     else if (['Glock'].includes(item.type)) playerStats.equipped.secondary = item;
                     else playerStats.equipped.knife = item;
+                    
+                    renderInventoryUI(); // Re-render to update equipped badges
                     if(gameState !== 'MAIN_MENU') { buildViewmodel(); updateInventoryHUD(); }
                 };
                 list.appendChild(div);
             });
         }
+        renderInventoryUI();
 
         // --- THREE.JS SETUP ---
         const scene = new THREE.Scene();
@@ -276,7 +332,7 @@
             const activeType = playerStats.activeSlot === 1 ? playerStats.equipped.primary?.type : (playerStats.activeSlot === 2 ? playerStats.equipped.secondary?.type : null);
             if (!activeType) return; 
 
-            camera.rotation.x += 0.02; // Recoil
+            camera.rotation.x += 0.02; 
             viewmodel.position.z += 0.05;
 
             flashLight.intensity = 2; flashMesh.visible = true; flashMesh.rotation.z = Math.random() * Math.PI;
@@ -339,13 +395,69 @@
             }
         });
 
+        // --- MINIMAP RADAR ---
+        const minimapCanvas = document.getElementById('minimap');
+        const ctx = minimapCanvas.getContext('2d');
+
+        function drawRadar() {
+            if (gameState !== 'PLAYING') return;
+            
+            ctx.clearRect(0, 0, 150, 150);
+            
+            // Background
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.beginPath();
+            ctx.arc(75, 75, 75, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Draw Cross/Lines
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.beginPath(); ctx.moveTo(75, 0); ctx.lineTo(75, 150); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, 75); ctx.lineTo(150, 75); ctx.stroke();
+
+            // Player Dot
+            ctx.fillStyle = '#0f0';
+            ctx.beginPath(); ctx.arc(75, 75, 4, 0, Math.PI * 2); ctx.fill();
+
+            // Get player yaw angle to rotate the map
+            const pDir = new THREE.Vector3();
+            camera.getWorldDirection(pDir);
+            const yaw = Math.atan2(pDir.x, pDir.z);
+
+            // Draw Bots
+            ctx.fillStyle = '#f00';
+            bots.forEach(bot => {
+                // Relative position
+                const dx = bot.collider.start.x - playerCollider.start.x;
+                const dz = bot.collider.start.z - playerCollider.start.z;
+                
+                // Rotate according to player camera
+                const cos = Math.cos(-yaw);
+                const sin = Math.sin(-yaw);
+                const rx = dx * cos - dz * sin;
+                const rz = dx * sin + dz * cos;
+
+                // Scale (1 unit = 2 pixels on radar)
+                const px = 75 + rx * 2;
+                const py = 75 + rz * 2;
+
+                // Only draw if within circle
+                if (Math.hypot(rx * 2, rz * 2) < 70) {
+                    ctx.beginPath();
+                    ctx.arc(px, py, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+        }
+
         // --- MENUS & CONTROLS ---
         const controls = new PointerLockControls(camera, document.body);
         const chatInput = document.getElementById('chat-input');
 
         window.connectToServer = () => {
-            if (!mapLoaded) return alert("Waiting for map...");
+            if (!mapLoaded) return alert("Waiting for map to finish loading...");
             document.getElementById('menu-layer').style.display = 'none';
+            document.getElementById('minimap').style.display = 'block';
             document.getElementById('hud').style.display = 'flex';
             document.getElementById('inventory-hud').style.display = 'flex';
             document.getElementById('chat-container').style.display = 'flex';
@@ -378,10 +490,15 @@
             const wep = e.target.getAttribute('data-weapon');
             if (playerStats.money >= price) {
                 playerStats.money -= price;
-                if(wep === 'AK-47') playerStats.equipped.primary = { type: 'AK-47', skin: SKIN_COLORS[0] };
-                if(wep === 'Glock') playerStats.equipped.secondary = { type: 'Glock', skin: SKIN_COLORS[0] };
+                
+                const item = { type: wep, skin: SKIN_COLORS[0], id: Date.now().toString() };
+                playerStats.inventory.push(item);
+
+                if(wep === 'AK-47') playerStats.equipped.primary = item;
+                if(wep === 'Glock') playerStats.equipped.secondary = item;
+                
                 playerStats.activeSlot = wep === 'AK-47' ? 1 : 2;
-                buildViewmodel(); updateInventoryHUD(); updateHUD(); controls.lock();
+                renderInventoryUI(); buildViewmodel(); updateInventoryHUD(); updateHUD(); controls.lock();
             }
         });
 
@@ -429,6 +546,7 @@
             document.getElementById('death-screen').style.display = 'flex';
             document.getElementById('hud').style.display = 'none';
             document.getElementById('crosshair').style.display = 'none';
+            document.getElementById('minimap').style.display = 'none';
             setTimeout(respawnPlayer, 3000);
         }
 
@@ -438,6 +556,7 @@
             document.getElementById('death-screen').style.display = 'none';
             document.getElementById('hud').style.display = 'flex';
             document.getElementById('crosshair').style.display = 'block';
+            document.getElementById('minimap').style.display = 'block';
             gameState = 'PLAYING'; controls.lock();
         }
 
@@ -507,6 +626,9 @@
                         bot.mesh.position.copy(bot.collider.start); bot.mesh.position.y += 0.19;
                     });
                 }
+                
+                // Draw Radar
+                drawRadar();
             }
             renderer.render(scene, camera);
         }
