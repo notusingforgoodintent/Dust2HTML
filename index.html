@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CS2 WebGL - Optimized Movement & AI</title>
+    <title>CS2 WebGL - Shadows & AI</title>
     <style>
         body {
             margin: 0;
@@ -40,6 +40,7 @@
             left: 15px;
             font-weight: bold;
             font-size: 14px;
+            text-shadow: 1px 1px 2px black;
         }
 
         #menu-container {
@@ -155,14 +156,35 @@
 
         const renderer = new THREE.WebGLRenderer({ antialias: false }); 
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(1.0); // Manage via settings
+        renderer.setPixelRatio(1.0);
+        
+        // NEW: Enable Shadows
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         document.body.appendChild(renderer.domElement);
 
-        // Basic lighting for entities (map doesn't use it for extreme optimization)
-        const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
+        // --- Lighting & Sun ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4); // Dimmed to make shadows visible
         scene.add(ambientLight);
 
-        // --- Physics & Collision Variables ---
+        const sunLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        sunLight.position.set(100, 200, 50);
+        sunLight.castShadow = true;
+        
+        // Configure shadow resolution and map size
+        sunLight.shadow.mapSize.width = 2048;
+        sunLight.shadow.mapSize.height = 2048;
+        sunLight.shadow.camera.near = 0.5;
+        sunLight.shadow.camera.far = 500;
+        const shadowSize = 150; // Covers a 300x300 area
+        sunLight.shadow.camera.left = -shadowSize;
+        sunLight.shadow.camera.right = shadowSize;
+        sunLight.shadow.camera.top = shadowSize;
+        sunLight.shadow.camera.bottom = -shadowSize;
+        sunLight.shadow.bias = -0.0005; // Prevents "shadow acne" artifacts
+        scene.add(sunLight);
+
+        // --- Physics Variables ---
         const clock = new THREE.Clock();
         const worldOctree = new Octree();
 
@@ -181,27 +203,31 @@
         let playerOnFloor = false;
         let mapLoaded = false;
 
-        // Visual Player Capsule (Transparent cyan so it doesn't block vision)
+        // Visual Player Capsule (Hidden per request, but exists in scene)
         const capsuleGeo = new THREE.CapsuleGeometry(CAPSULE_RADIUS, HEIGHT_STAND, 4, 8);
         const playerMat = new THREE.MeshBasicMaterial({ color: 0x00aaff, transparent: true, opacity: 0.2, wireframe: true });
         const playerMesh = new THREE.Mesh(capsuleGeo, playerMat);
+        playerMesh.visible = false; // Hidden from view
         scene.add(playerMesh);
 
-        // Movement Tweaks
+        // Speeds
         const GRAVITY = 30.0;
         const JUMP_FORCE = 11.0;
-        const BASE_SPEED = 28.0;   // Slower walk
-        const SPRINT_SPEED = 55.0; // Slower sprint (Acts as absolute Cap)
+        const BASE_SPEED = 28.0;   
+        const SPRINT_SPEED = 55.0; // The absolute maximum cap
         const CROUCH_SPEED = 12.0; 
         const AIR_CONTROL = 12.0;
 
         // --- AI Bots Setup ---
         const bots = [];
-        const botMat = new THREE.MeshBasicMaterial({ color: 0xff3333 }); // Red visible bots
+        const botMat = new THREE.MeshLambertMaterial({ color: 0xff3333 }); // Lambert allows shadows
 
         for (let i = 0; i < 3; i++) {
             const botMesh = new THREE.Mesh(capsuleGeo, botMat);
+            botMesh.castShadow = true;
+            botMesh.receiveShadow = true;
             scene.add(botMesh);
+            
             bots.push({
                 collider: new Capsule(new THREE.Vector3(), new THREE.Vector3(0, HEIGHT_STAND, 0), CAPSULE_RADIUS),
                 mesh: botMesh,
@@ -233,7 +259,6 @@
             document.getElementById('settings-menu').classList.remove('active');
         });
 
-        // Settings Listeners
         document.getElementById('res-slider').addEventListener('input', (e) => {
             const val = parseFloat(e.target.value);
             renderer.setPixelRatio(window.devicePixelRatio * val);
@@ -254,7 +279,7 @@
             bots.forEach(bot => bot.mesh.visible = botsEnabled);
         });
 
-        // Input Tracking
+        // Input
         const keyStates = { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false, ShiftLeft: false, ControlLeft: false };
         document.addEventListener('keydown', (e) => { if (keyStates[e.code] !== undefined) keyStates[e.code] = true; });
         document.addEventListener('keyup', (e) => { if (keyStates[e.code] !== undefined) keyStates[e.code] = false; });
@@ -269,13 +294,16 @@
             (gltf) => {
                 const map = gltf.scene;
 
-                // EXTREME OPTIMIZATION: Convert all materials to Basic (No Light Calculation)
+                // Configure map materials for cheap lighting and shadows
                 map.traverse((child) => {
                     if (child.isMesh && child.material) {
                         child.frustumCulled = true;
-                        // Strip complex shaders, keep the texture map
-                        const basicMat = new THREE.MeshBasicMaterial({ map: child.material.map });
-                        child.material = basicMat;
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                        
+                        // Lambert Material calculates cheap shadows but ignores expensive reflections
+                        const lambertMat = new THREE.MeshLambertMaterial({ map: child.material.map });
+                        child.material = lambertMat;
                     }
                 });
 
@@ -285,24 +313,28 @@
                 const center = box.getCenter(new THREE.Vector3());
                 const dropHeight = center.y + 10; 
                 
-                // Spawn Player
+                // Teleport Player
                 playerCollider.start.set(center.x, dropHeight, center.z);
                 playerCollider.end.set(center.x, dropHeight + HEIGHT_STAND, center.z); 
+                
+                // Center sunlight over the map
+                sunLight.position.set(center.x + 100, center.y + 200, center.z + 50);
+                sunLight.target.position.copy(center);
+                sunLight.target.updateMatrixWorld();
 
-                // Spawn Bots nearby
+                // Teleport Bots
                 bots.forEach((bot, index) => {
-                    const offset = index * 2 + 2;
+                    const offset = index * 3 + 3;
                     bot.collider.start.set(center.x + offset, dropHeight, center.z + offset);
                     bot.collider.end.set(center.x + offset, dropHeight + HEIGHT_STAND, center.z + offset);
                 });
 
                 worldOctree.fromGraphNode(map);
                 mapLoaded = true;
-
                 loadingText.innerText = "";
             },
             (xhr) => {
-                loadingText.innerText = `Loading Map: ${Math.round(xhr.loaded / xhr.total * 100)}%`;
+                loadingText.innerText = `Loading Shadows & Map: ${Math.round(xhr.loaded / xhr.total * 100)}%`;
             },
             (error) => { loadingText.innerText = "Error loading map!"; }
         );
@@ -340,15 +372,6 @@
                 keyStates['Space'] = false; 
             }
 
-            // --- STRICT SPEED CAP ---
-            // Ensures player cannot exceed sprint speed horizontally (stops strafe-jumping abuse)
-            const horizontalSpeed = Math.sqrt(playerVelocity.x * playerVelocity.x + playerVelocity.z * playerVelocity.z);
-            if (horizontalSpeed > SPRINT_SPEED) {
-                const ratio = SPRINT_SPEED / horizontalSpeed;
-                playerVelocity.x *= ratio;
-                playerVelocity.z *= ratio;
-            }
-
             // Smooth FOV & Crouch
             camera.fov += ((baseFov + (isSprinting ? 15 : 0)) - camera.fov) * 10.0 * deltaTime;
             camera.updateProjectionMatrix();
@@ -372,7 +395,7 @@
                 }
                 collider.translate(result.normal.multiplyScalar(result.depth));
             }
-            return onFloor;
+            return { onFloor, result };
         }
 
         function updatePlayer(deltaTime) {
@@ -383,16 +406,25 @@
             }
 
             playerVelocity.addScaledVector(playerVelocity, damping);
+            
+            // --- STRICT SPEED CAP (Bhop Fix) ---
+            // Mathematically locks the magnitude of the X/Z vector so it can never exceed SPRINT_SPEED
+            const hSpeed = Math.sqrt(playerVelocity.x * playerVelocity.x + playerVelocity.z * playerVelocity.z);
+            if (hSpeed > SPRINT_SPEED) {
+                const ratio = SPRINT_SPEED / hSpeed;
+                playerVelocity.x *= ratio;
+                playerVelocity.z *= ratio;
+            }
+
             playerCollider.translate(playerVelocity.clone().multiplyScalar(deltaTime));
 
-            playerOnFloor = applyCollisions(playerCollider, playerVelocity);
+            const colData = applyCollisions(playerCollider, playerVelocity);
+            playerOnFloor = colData.onFloor;
             
-            // Sync Camera and Player Mesh
             camera.position.copy(playerCollider.end);
             playerMesh.position.copy(playerCollider.start);
-            playerMesh.position.y += HEIGHT_STAND / 2; // Center mesh vertically
+            playerMesh.position.y += HEIGHT_STAND / 2; 
 
-            // Void Fail-safe
             if (camera.position.y < -500) {
                 playerVelocity.set(0, 0, 0);
                 playerCollider.start.y += 200; 
@@ -406,9 +438,8 @@
             bots.forEach(bot => {
                 bot.turnTimer -= deltaTime;
                 if (bot.turnTimer <= 0) {
-                    // Pick new random direction
                     bot.direction.set(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
-                    bot.turnTimer = 1 + Math.random() * 3; // Change direction every 1-4 seconds
+                    bot.turnTimer = 1 + Math.random() * 3; 
                 }
 
                 let damping = Math.exp(-15 * deltaTime) - 1;
@@ -417,12 +448,10 @@
                     damping *= 0.05;
                 }
 
-                // AI Walks Forward constantly
                 if (bot.onFloor) {
                     bot.velocity.add(bot.direction.clone().multiplyScalar(BASE_SPEED * deltaTime));
                 }
 
-                // AI Speed Cap
                 const hSpeed = Math.sqrt(bot.velocity.x * bot.velocity.x + bot.velocity.z * bot.velocity.z);
                 if (hSpeed > BASE_SPEED) {
                     bot.velocity.x *= (BASE_SPEED / hSpeed);
@@ -432,27 +461,19 @@
                 bot.velocity.addScaledVector(bot.velocity, damping);
                 bot.collider.translate(bot.velocity.clone().multiplyScalar(deltaTime));
 
-                // Manual collision check to let them bounce off walls
-                const result = worldOctree.capsuleIntersect(bot.collider);
-                bot.onFloor = false;
-                if (result) {
-                    bot.onFloor = result.normal.y > 0.5;
-                    if (!bot.onFloor) {
-                        // Wall Hit: Bounce/Reflect direction
-                        bot.velocity.addScaledVector(result.normal, -result.normal.dot(bot.velocity));
-                        bot.direction.reflect(result.normal).normalize();
-                        bot.direction.y = 0; 
-                    } else {
-                        bot.velocity.y = Math.max(0, bot.velocity.y);
-                    }
-                    bot.collider.translate(result.normal.multiplyScalar(result.depth));
+                const colData = applyCollisions(bot.collider, bot.velocity);
+                bot.onFloor = colData.onFloor;
+                
+                // NEW: Fixed AI Pathfinding
+                // If they hit a wall, force them to immediately pick a totally new direction so they don't get stuck
+                if (colData.result && !bot.onFloor) {
+                    bot.direction.set(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
+                    bot.turnTimer = 1.0; // Wait 1 second before randomly turning again
                 }
 
-                // Sync Bot Mesh
                 bot.mesh.position.copy(bot.collider.start);
                 bot.mesh.position.y += HEIGHT_STAND / 2;
                 
-                // Void fail-safe for bots
                 if (bot.mesh.position.y < -500) {
                     bot.velocity.set(0, 0, 0);
                     bot.collider.start.y += 200;
